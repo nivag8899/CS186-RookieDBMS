@@ -75,6 +75,7 @@ import java.util.function.UnaryOperator;
  *   X lock on `database/_metadata.indices/someTable`.
  */
 public class Database implements AutoCloseable {
+    //add comments test
     private static final String METADATA_TABLE_PREFIX = "_metadata.";
     private static final String TABLE_INFO_TABLE_NAME = METADATA_TABLE_PREFIX + "tables";
     private static final String INDEX_INFO_TABLE_NAME = METADATA_TABLE_PREFIX + "indices";
