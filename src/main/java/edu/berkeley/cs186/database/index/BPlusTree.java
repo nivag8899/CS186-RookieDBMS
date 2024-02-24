@@ -234,12 +234,10 @@ public class BPlusTree {
 
 
     private void splitRoot(DataBox key, Long child) {
-        List<DataBox> keys = new ArrayList<>();
-        keys.add(key); // insert split_key into the new root
-        List<Long> children = new ArrayList<>();
-        children.add(root.getPage().getPageNum()); // left child : original root
-        children.add(child); // right child : new_split node
-        BPlusNode newRoot = new InnerNode(metadata, bufferManager, keys, children, lockContext);
+        List<DataBox> rootKeys = new ArrayList<>();
+        rootKeys.add(key);
+        List<Long> rootChildren = Arrays.asList(root.getPage().getPageNum(), child);
+        InnerNode newRoot = new InnerNode(metadata, bufferManager, rootKeys, rootChildren, lockContext);
         updateRoot(newRoot);
     }
     /**
@@ -262,10 +260,7 @@ public class BPlusTree {
         // Use the provided updateRoot() helper method to change
         // the tree's root if the old root splits.
         Optional<Pair<DataBox, Long>> splitInfo = root.put(key, rid);
-        if (splitInfo.isPresent()) {
-            // split the root
-            splitRoot(splitInfo.get().getFirst(), splitInfo.get().getSecond());
-        }
+        splitInfo.ifPresent(info -> splitRoot(info.getFirst(), info.getSecond()));
         return;
     }
 

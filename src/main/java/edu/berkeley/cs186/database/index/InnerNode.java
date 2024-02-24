@@ -125,14 +125,10 @@ class InnerNode extends BPlusNode {
         // TODO(proj2): implement
         BPlusNode child = BPlusNode.fromBytes(metadata, bufferManager, treeContext, children.get(numLessThanEqual(key, keys)));
         Optional<Pair<DataBox, Long>> splitInfo = child.put(key, rid);
-        if (!splitInfo.isPresent()) {
-            // the child does not split, return Optional.empty()
-            return splitInfo;
-        } else {
-            // the child split, insert the (split_key, child_node_pageNum) into this node
-            Pair<DataBox, Long> info = splitInfo.get();
-            return insert(info.getFirst(), info.getSecond());
+        if (splitInfo.isPresent()) {
+            return insert(splitInfo.get().getFirst(), splitInfo.get().getSecond());
         }
+        return Optional.empty();
 
     }
 
