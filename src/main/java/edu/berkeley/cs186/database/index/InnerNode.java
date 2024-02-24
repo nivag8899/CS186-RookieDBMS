@@ -138,27 +138,22 @@ class InnerNode extends BPlusNode {
 
     // See BPlusNode.bulkLoad.
     @Override
-    public Optional<Pair<DataBox, Long>> bulkLoad(Iterator<Pair<DataBox, RecordId>> data, float fillFactor) {
-        // TODO(proj2): implement
-        BPlusNode rightMostChild = BPlusNode.fromBytes(metadata, bufferManager, treeContext, children.get(children.size() - 1));
-        Optional<Pair<DataBox, Long>> splitInfo = rightMostChild.bulkLoad(data, fillFactor);
-        if (!splitInfo.isPresent()) {
-            // child does not split
-            return splitInfo;
-        } else {
-            // child split
-            DataBox split_key = splitInfo.get().getFirst();
-            Long child = splitInfo.get().getSecond();
-            Optional<Pair<DataBox, Long>> mySplitInfo = insert(split_key, child);
-            if (!mySplitInfo.isPresent()) {
-                // this inner node does not split, call bulk load recursively
-                return bulkLoad(data, fillFactor);
-            } else {
-                // this inner node split
-                return mySplitInfo;
-            }
+    public Optional<Pair<DataBox, Long>> bulkLoad(Iterator<Pair<DataBox, RecordId>> entries, float fillFactor) {
+        // Load data into the rightmost child
+        BPlusNode lastChild = BPlusNode.fromBytes(metadata, bufferManager, treeContext, children.get(children.size() - 1));
+        Optional<Pair<DataBox, Long>> childSplit = lastChild.bulkLoad(entries, fillFactor);
+        // If no split occurred in child, return as is
+        if (!childSplit.isPresent()) {
+            return childSplit;
         }
+        // Handle child split by attempting to insert the new key and child pointer
+        Pair<DataBox, Long> splitDetails = childSplit.get();
+        Optional<Pair<DataBox, Long>> resultOfInsert = insert(splitDetails.getFirst(), splitDetails.getSecond());
+        // If the insert doesn't cause this node to split, attempt bulk load again
+        // Otherwise, return the split information of this node
+        return resultOfInsert.isPresent() ? resultOfInsert : bulkLoad(entries, fillFactor);
     }
+
 
     // See BPlusNode.remove.
     @Override

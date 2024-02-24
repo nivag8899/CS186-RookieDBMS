@@ -193,30 +193,31 @@ class LeafNode extends BPlusNode {
 
     // See BPlusNode.bulkLoad.
     @Override
-    public Optional<Pair<DataBox, Long>> bulkLoad(Iterator<Pair<DataBox, RecordId>> data,
-                                                  float fillFactor) {
-        // TODO(proj2): implement
-        int maxRecords = (int)Math.ceil(fillFactor * metadata.getOrder() * 2);
-        while (keys.size() < maxRecords && data.hasNext()) {
-            Pair<DataBox, RecordId> p = data.next();
-            keys.add(p.getFirst());
-            rids.add(p.getSecond());
+    public Optional<Pair<DataBox, Long>> bulkLoad(Iterator<Pair<DataBox, RecordId>> entries, float fillFactor) {
+        int capacity = (int) Math.ceil(fillFactor * metadata.getOrder() * 2); // Calculate maximum records based on fill factor
+        // Load entries into the current node until it reaches capacity
+        while (keys.size() < capacity && entries.hasNext()) {
+            Pair<DataBox, RecordId> entry = entries.next();
+            keys.add(entry.getFirst()); // Add key
+            rids.add(entry.getSecond()); // Add record ID
         }
-        // if there is more data, then split
-        Optional<Pair<DataBox, Long>> ret = Optional.empty();
-        if (data.hasNext()) {
-            List<DataBox> new_keys = new ArrayList<>();
-            List<RecordId> new_rids = new ArrayList<>();
-            Pair<DataBox, RecordId> p = data.next();
-            new_keys.add(p.getFirst());
-            new_rids.add(p.getSecond());
-            LeafNode new_rightSibling = new LeafNode(metadata, bufferManager, new_keys, new_rids, rightSibling, treeContext);
-            rightSibling = Optional.of(new_rightSibling.getPage().getPageNum());
-            ret = Optional.of(new Pair(p.getFirst(), rightSibling.get()));
+        // Split if there are more entries
+        Optional<Pair<DataBox, Long>> splitResult = Optional.empty();
+        if (entries.hasNext()) {
+            List<DataBox> splitKeys = new ArrayList<>();
+            List<RecordId> splitRids = new ArrayList<>();
+            Pair<DataBox, RecordId> splitEntry = entries.next();
+            splitKeys.add(splitEntry.getFirst());
+            splitRids.add(splitEntry.getSecond());
+            // Create a new leaf node for the split
+            LeafNode sibling = new LeafNode(metadata, bufferManager, splitKeys, splitRids, rightSibling, treeContext);
+            rightSibling = Optional.of(sibling.getPage().getPageNum()); // Update right sibling reference
+            splitResult = Optional.of(new Pair<>(splitEntry.getFirst(), rightSibling.get()));
         }
-        sync();
-        return ret;
+        sync(); // Ensure the node is synced with storage
+        return splitResult;
     }
+
 
     // See BPlusNode.remove.
     @Override

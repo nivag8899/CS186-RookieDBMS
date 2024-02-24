@@ -300,13 +300,11 @@ public class BPlusTree {
         // Use the provided updateRoot() helper method to change
         // the tree's root if the old root splits.
         if (scanAll().hasNext()) {
-            throw new RuntimeException("buldLoad must be called in an empty tree");
+            throw new RuntimeException("Bulk load is only allowed on an empty tree.");
         }
         while (data.hasNext()) {
-            Optional<Pair<DataBox, Long>> splitInfo = root.bulkLoad(data, fillFactor);
-            if (splitInfo.isPresent()) {
-                splitRoot(splitInfo.get().getFirst(), splitInfo.get().getSecond());
-            }
+            Optional<Pair<DataBox, Long>> newRootInfo = root.bulkLoad(data, fillFactor);
+            newRootInfo.ifPresent(info -> splitRoot(info.getFirst(), info.getSecond()));
         }
         return;
     }
