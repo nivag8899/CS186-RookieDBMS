@@ -14,6 +14,7 @@ class GroupByOperator extends QueryOperator {
     private List<String> groupByColumns;
     private TransactionContext transaction;
 
+    //git test
     /**
      * Create a new GroupByOperator that pulls from source and groups by groupByColumn.
      *
