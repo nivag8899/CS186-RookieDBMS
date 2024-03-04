@@ -94,7 +94,6 @@ public class BNLJOperator extends JoinOperator {
                     (leftSourceIterator,getLeftSource().getSchema(),numBuffers - 2);
             leftBlockIterator.markNext();
             leftRecord = leftBlockIterator.next();
-
         }
 
         /**
