@@ -659,6 +659,43 @@ public class QueryPlan {
         //      calculate the cheapest join with the new table (the one you
         //      fetched an operator for from pass1Map) and the previously joined
         //      tables. Then, update the result map if needed.
+        // 遍历前一轮中所有已经组合的表集合
+        for (Set<String> prevTables : prevMap.keySet()) {
+            // 对于每个可能的连接谓词
+            for (JoinPredicate joinPredicate : this.joinPredicates) {
+
+                // 准备新的表集合以检查是否可以应用当前的连接谓词
+                Set<String> candidateSet = new HashSet<>(prevTables);
+
+                // 初始化变量来存储参与连接的查询操作符
+                QueryOperator newJoinOperator = null;
+                Set<String> newTableSet = new HashSet<>();
+
+                // 检查是否存在一个有效的连接情况
+                if (prevTables.contains(joinPredicate.leftTable) && !prevTables.contains(joinPredicate.rightTable)) {
+                    // 情况1: 左表在集合中，右表不在
+                    newTableSet.add(joinPredicate.rightTable);
+                    QueryOperator rightOperator = pass1Map.get(newTableSet);
+                    newJoinOperator = minCostJoinType(prevMap.get(prevTables), rightOperator, joinPredicate.leftColumn, joinPredicate.rightColumn);
+                    candidateSet.add(joinPredicate.rightTable);
+                } else if (!prevTables.contains(joinPredicate.leftTable) && prevTables.contains(joinPredicate.rightTable)) {
+                    // 情况2: 右表在集合中，左表不在
+                    newTableSet.add(joinPredicate.leftTable);
+                    QueryOperator leftOperator = pass1Map.get(newTableSet);
+                    newJoinOperator = minCostJoinType(prevMap.get(prevTables), leftOperator, joinPredicate.rightColumn, joinPredicate.leftColumn);
+                    candidateSet.add(joinPredicate.leftTable);
+                } else {
+                    // 情况3: 无法应用当前的连接谓词，跳过
+                    continue;
+                }
+
+                // 检查是否需要更新结果集，即看是否找到了成本更低的连接操作
+                if (!result.containsKey(candidateSet) || result.get(candidateSet).estimateIOCost() > newJoinOperator.estimateIOCost()) {
+                    result.put(candidateSet, newJoinOperator);
+                }
+            }
+        }
+
         return result;
     }
 
@@ -708,6 +745,7 @@ public class QueryPlan {
         // Set the final operator to the lowest cost operator from the last
         // pass, add group by, project, sort and limit operators, and return an
         // iterator over the final operator.
+
         return this.executeNaive(); // TODO(proj3_part2): Replace this!
     }
 
