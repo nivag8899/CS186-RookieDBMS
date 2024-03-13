@@ -764,6 +764,7 @@ public class QueryPlan {
         addGroupBy();
         addProject();
         addLimit();
+        addSort();
         return this.finalOperator.iterator();
         //return this.executeNaive(); // TODO(proj3_part2): Replace this!
     }
