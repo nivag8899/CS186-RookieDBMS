@@ -94,8 +94,21 @@ public enum LockType {
             throw new NullPointerException("null lock type");
         }
         // TODO(proj4_part1): implement
-
-        return false;
+        if (substitute == LockType.NL) {
+            return required == LockType.NL;
+        } else if (substitute == LockType.IS) {
+            return required == LockType.NL || required == LockType.IS;
+        } else if (substitute == LockType.IX) {
+            return required == LockType.NL || required == LockType.IS || required == LockType.IX;
+        } else if (substitute == LockType.S) {
+            return required == LockType.NL || required == LockType.IS || required == LockType.S;
+        } else if (substitute == LockType.SIX) {
+            return required != LockType.X;
+        } else if (substitute == LockType.X) {
+            return true;
+        } else {
+            throw new UnsupportedOperationException("bad lock type");
+        }
     }
 
     /**
