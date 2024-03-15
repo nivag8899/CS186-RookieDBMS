@@ -169,6 +169,12 @@ public class TestLockType {
         assertFalse(LockType.canBeParentLock(LockType.IS, LockType.IX));
         assertFalse(LockType.canBeParentLock(LockType.IS, LockType.X));
         assertFalse(LockType.canBeParentLock(LockType.IS, LockType.SIX));
+
+        assertFalse(LockType.canBeParentLock(LockType.SIX, LockType.S));
+        assertTrue(LockType.canBeParentLock(LockType.SIX, LockType.X));
+        assertFalse(LockType.canBeParentLock(LockType.SIX, LockType.IS));
+        assertTrue(LockType.canBeParentLock(LockType.SIX, LockType.IX));
+        assertFalse(LockType.canBeParentLock(LockType.SIX, LockType.SIX));
     }
 
     /**

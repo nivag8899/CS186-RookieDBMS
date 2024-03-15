@@ -75,7 +75,7 @@ public enum LockType {
         } else if (parentLockType == LockType.S) {
             return childLockType == LockType.NL;
         } else if (parentLockType == LockType.SIX) {
-            return childLockType == LockType.NL || childLockType == LockType.X || childLockType == LockType.IX || childLockType == LockType.SIX;
+            return childLockType == LockType.NL || childLockType == LockType.X || childLockType == LockType.IX ;
         } else if (parentLockType == LockType.X) {
             return childLockType == LockType.NL;
         } else {
