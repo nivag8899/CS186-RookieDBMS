@@ -294,6 +294,12 @@ public class TestLockType {
 
         // IS's privileges are not a superset of IX's privileges
         assertFalse(LockType.substitutable(LockType.IS, LockType.IX));
+        // IX substitutability sanity checks
+        assertTrue(LockType.substitutable(LockType.IX, LockType.IX));
+        assertFalse(LockType.substitutable(LockType.S, LockType.IX));
+        assertFalse(LockType.substitutable(LockType.X, LockType.IX));
+        assertFalse(LockType.substitutable(LockType.SIX, LockType.IX));
+        assertFalse(LockType.substitutable(LockType.IS, LockType.IX));
     }
 
 }
