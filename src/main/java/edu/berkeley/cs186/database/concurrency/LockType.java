@@ -66,8 +66,21 @@ public enum LockType {
             throw new NullPointerException("null lock type");
         }
         // TODO(proj4_part1): implement
-
-        return false;
+        if (parentLockType == LockType.NL) {
+            return childLockType == LockType.NL;
+        } else if (parentLockType == LockType.IS) {
+            return childLockType == LockType.NL || childLockType == LockType.IS || childLockType == LockType.S;
+        } else if (parentLockType == LockType.IX) {
+            return true;
+        } else if (parentLockType == LockType.S) {
+            return childLockType == LockType.NL;
+        } else if (parentLockType == LockType.SIX) {
+            return childLockType == LockType.NL || childLockType == LockType.X || childLockType == LockType.IX || childLockType == LockType.SIX;
+        } else if (parentLockType == LockType.X) {
+            return childLockType == LockType.NL;
+        } else {
+            throw new UnsupportedOperationException("bad lock type");
+        }
     }
 
     /**
