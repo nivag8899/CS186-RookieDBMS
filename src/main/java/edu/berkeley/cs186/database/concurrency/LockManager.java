@@ -58,7 +58,14 @@ public class LockManager {
          */
         public boolean checkCompatible(LockType lockType, long except) {
             // TODO(proj4_part1): implement
-            return false;
+            for(Lock lockIterator : locks){
+                if(lockIterator.transactionNum == except){
+                    continue;
+                }
+                if(!LockType.compatible(lockIterator.lockType, lockType))
+                    return false;
+            }
+            return true;
         }
 
         /**
