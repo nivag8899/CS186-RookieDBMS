@@ -77,6 +77,13 @@ public class TestLockType {
         assertFalse(LockType.compatible(LockType.X, LockType.S));
         assertFalse(LockType.compatible(LockType.IX, LockType.S));
         assertFalse(LockType.compatible(LockType.SIX, LockType.S));
+
+        assertFalse(LockType.compatible(LockType.X, LockType.IS));
+        assertFalse(LockType.compatible(LockType.X, LockType.IX));
+        assertFalse(LockType.compatible(LockType.X, LockType.SIX));
+        assertFalse(LockType.compatible(LockType.IS, LockType.X));
+        assertFalse(LockType.compatible(LockType.IX, LockType.X));
+        assertFalse(LockType.compatible(LockType.SIX, LockType.X));
     }
 
     @Test
@@ -87,6 +94,13 @@ public class TestLockType {
         assertTrue(LockType.compatible(LockType.IS, LockType.IX));
         assertTrue(LockType.compatible(LockType.IX, LockType.IS));
         assertTrue(LockType.compatible(LockType.IX, LockType.IX));
+
+        // IS compatibility sanity checks
+        assertTrue(LockType.compatible(LockType.IS, LockType.SIX));
+        assertTrue(LockType.compatible(LockType.SIX, LockType.IS));
+        assertFalse(LockType.compatible(LockType.IX, LockType.SIX));
+        assertFalse(LockType.compatible(LockType.SIX, LockType.IX));
+        assertFalse(LockType.compatible(LockType.SIX, LockType.SIX));
     }
 
     @Test
@@ -107,6 +121,13 @@ public class TestLockType {
         assertEquals(LockType.IS, LockType.parentLock(LockType.IS));
         assertEquals(LockType.IX, LockType.parentLock(LockType.IX));
         assertEquals(LockType.IX, LockType.parentLock(LockType.SIX));
+
+        // S canBeParent sanity checks
+        for (LockType lockType : LockType.values()) {
+            if (lockType != LockType.NL) {
+                assertFalse(LockType.canBeParentLock(LockType.S, lockType));
+            }
+        }
     }
 
     /**
