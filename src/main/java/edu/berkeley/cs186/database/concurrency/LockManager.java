@@ -145,6 +145,11 @@ public class LockManager {
          */
         public LockType getTransactionLockType(long transaction) {
             // TODO(proj4_part1): implement
+            for(Lock lockIterator : locks){
+                if(lockIterator.transactionNum == transaction){
+                    return lockIterator.lockType;
+                }
+            }
             return LockType.NL;
         }
 
