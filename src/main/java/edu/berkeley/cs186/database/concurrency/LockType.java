@@ -101,11 +101,11 @@ public enum LockType {
         } else if (substitute == LockType.IX) {
             return required == LockType.NL || required == LockType.IS || required == LockType.IX;
         } else if (substitute == LockType.S) {
-            return required == LockType.NL || required == LockType.IS || required == LockType.S;
+            return required == LockType.NL || required == LockType.S;
         } else if (substitute == LockType.SIX) {
-            return required != LockType.X && required != LockType.IX;
+            return required != LockType.X && required != LockType.IX && required != LockType.IS;
         } else if (substitute == LockType.X) {
-            return required != LockType.SIX && required != LockType.IX;
+            return required != LockType.SIX && required != LockType.IX && required != LockType.IS;
         } else {
             throw new UnsupportedOperationException("bad lock type");
         }
