@@ -82,6 +82,7 @@ public class LockManager {
                 }
             }
             addLockHelper(lock);
+            locks.add(lock);
             return;
         }
 
@@ -108,6 +109,8 @@ public class LockManager {
             // TODO(proj4_part1): implement
             long thisTransNum = lock.transactionNum;
             transactionLocks.get(thisTransNum).remove(lock);
+            locks.remove(lock);
+            processQueue();
             return;
         }
 
@@ -117,6 +120,11 @@ public class LockManager {
          */
         public void addToQueue(LockRequest request, boolean addFront) {
             // TODO(proj4_part1): implement
+            if(addFront){
+                waitingQueue.addFirst(request);
+            }else{
+                waitingQueue.addLast(request);
+            }
             return;
         }
 
