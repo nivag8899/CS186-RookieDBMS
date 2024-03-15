@@ -105,7 +105,7 @@ public enum LockType {
         } else if (substitute == LockType.SIX) {
             return required != LockType.X;
         } else if (substitute == LockType.X) {
-            return true;
+            return required != LockType.SIX;
         } else {
             throw new UnsupportedOperationException("bad lock type");
         }
