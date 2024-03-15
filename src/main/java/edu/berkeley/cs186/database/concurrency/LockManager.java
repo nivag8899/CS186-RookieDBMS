@@ -120,9 +120,9 @@ public class LockManager {
          */
         public void addToQueue(LockRequest request, boolean addFront) {
             // TODO(proj4_part1): implement
-            if(addFront){
+            if (addFront) {
                 waitingQueue.addFirst(request);
-            }else{
+            } else {
                 waitingQueue.addLast(request);
             }
             return;
@@ -134,8 +134,18 @@ public class LockManager {
          * granted, the transaction that made the request can be unblocked.
          */
         private void processQueue() {
-            Iterator<LockRequest> requests = waitingQueue.iterator();
-
+            Iterator<LockRequest> requestIterator = waitingQueue.iterator();
+            LockRequest request;
+            while (requestIterator.hasNext()) {
+                request = requestIterator.next();
+                if (checkCompatible(request.lock.lockType, request.transaction.getTransNum())) {
+                    waitingQueue.removeFirst();
+                    releaseLock(request.lock);
+                    grantOrUpdateLock(request.lock);
+                } else {
+                    break;
+                }
+            }
             // TODO(proj4_part1): implement
             return;
         }
@@ -145,8 +155,8 @@ public class LockManager {
          */
         public LockType getTransactionLockType(long transaction) {
             // TODO(proj4_part1): implement
-            for(Lock lockIterator : locks){
-                if(lockIterator.transactionNum == transaction){
+            for (Lock lockIterator : locks) {
+                if (lockIterator.transactionNum == transaction) {
                     return lockIterator.lockType;
                 }
             }
