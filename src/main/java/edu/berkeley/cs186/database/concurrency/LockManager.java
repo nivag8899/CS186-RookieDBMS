@@ -9,11 +9,11 @@ import java.util.*;
  * on what resources and handles queuing logic. The lock manager should generally
  * NOT be used directly: instead, code should call methods of LockContext to
  * acquire/release/promote/escalate locks.
- *
+ * <p>
  * The LockManager is primarily concerned with the mappings between
  * transactions, resources, and locks, and does not concern itself with multiple
  * levels of granularity. Multigranularity is handled by LockContext instead.
- *
+ * <p>
  * Each resource the lock manager manages has its own queue of LockRequest
  * objects representing a request to acquire (or promote/acquire-and-release) a
  * lock that could not be satisfied at the time. This queue should be processed
@@ -24,9 +24,9 @@ import java.util.*;
  * removing a request by T1 to acquire X(db) should be treated as if T1 had just
  * requested X(db) and there were no queue on db: T1 should be given the X lock
  * on db, and put in an unblocked state via Transaction#unblock).
- *
+ * <p>
  * This does mean that in the case of:
- *    queue: S(A) X(A) S(A)
+ * queue: S(A) X(A) S(A)
  * only the first request should be removed from the queue when the queue is
  * processed.
  */
@@ -58,11 +58,11 @@ public class LockManager {
          */
         public boolean checkCompatible(LockType lockType, long except) {
             // TODO(proj4_part1): implement
-            for(Lock lockIterator : locks){
-                if(lockIterator.transactionNum == except){
+            for (Lock lockIterator : locks) {
+                if (lockIterator.transactionNum == except) {
                     continue;
                 }
-                if(!LockType.compatible(lockIterator.lockType, lockType))
+                if (!LockType.compatible(lockIterator.lockType, lockType))
                     return false;
             }
             return true;
@@ -75,7 +75,29 @@ public class LockManager {
          */
         public void grantOrUpdateLock(Lock lock) {
             // TODO(proj4_part1): implement
+            for (Lock lockIterator : locks) {
+                if (Objects.equals(lockIterator.transactionNum, lock.transactionNum)) {
+                    lockIterator.lockType = lock.lockType;
+                    updateLockHelper(lock);
+                }
+            }
+            addLockHelper(lock);
             return;
+        }
+
+        private void updateLockHelper(Lock lock) {
+            long thisTransNum = lock.transactionNum;
+            for (Lock thisTransLockIterator : transactionLocks.get(thisTransNum)) {
+                if (Objects.equals(thisTransLockIterator.name, lock.name)) {
+                    thisTransLockIterator.lockType = lock.lockType;
+                }
+            }
+        }
+
+        private void addLockHelper(Lock lock) {
+            long thisTransNum = lock.transactionNum;
+            transactionLocks.putIfAbsent(thisTransNum, new ArrayList<>());
+            transactionLocks.get(thisTransNum).add(lock);
         }
 
         /**
@@ -139,24 +161,24 @@ public class LockManager {
      * Acquire a `lockType` lock on `name`, for transaction `transaction`, and
      * releases all locks on `releaseNames` held by the transaction after
      * acquiring the lock in one atomic action.
-     *
+     * <p>
      * Error checking must be done before any locks are acquired or released. If
      * the new lock is not compatible with another transaction's lock on the
      * resource, the transaction is blocked and the request is placed at the
      * FRONT of the resource's queue.
-     *
+     * <p>
      * Locks on `releaseNames` should be released only after the requested lock
      * has been acquired. The corresponding queues should be processed.
-     *
+     * <p>
      * An acquire-and-release that releases an old lock on `name` should NOT
      * change the acquisition time of the lock on `name`, i.e. if a transaction
      * acquired locks in the order: S(A), X(B), acquire X(A) and release S(A),
      * the lock on A is considered to have been acquired before the lock on B.
      *
      * @throws DuplicateLockRequestException if a lock on `name` is already held
-     * by `transaction` and isn't being released
-     * @throws NoLockHeldException if `transaction` doesn't hold a lock on one
-     * or more of the names in `releaseNames`
+     *                                       by `transaction` and isn't being released
+     * @throws NoLockHeldException           if `transaction` doesn't hold a lock on one
+     *                                       or more of the names in `releaseNames`
      */
     public void acquireAndRelease(TransactionContext transaction, ResourceName name,
                                   LockType lockType, List<ResourceName> releaseNames)
@@ -167,7 +189,7 @@ public class LockManager {
         // move the synchronized block elsewhere if you wish.
         boolean shouldBlock = false;
         synchronized (this) {
-            
+
         }
         if (shouldBlock) {
             transaction.block();
@@ -176,14 +198,14 @@ public class LockManager {
 
     /**
      * Acquire a `lockType` lock on `name`, for transaction `transaction`.
-     *
+     * <p>
      * Error checking must be done before the lock is acquired. If the new lock
      * is not compatible with another transaction's lock on the resource, or if there are
      * other transaction in queue for the resource, the transaction is
      * blocked and the request is placed at the **back** of NAME's queue.
      *
      * @throws DuplicateLockRequestException if a lock on `name` is held by
-     * `transaction`
+     *                                       `transaction`
      */
     public void acquire(TransactionContext transaction, ResourceName name,
                         LockType lockType) throws DuplicateLockRequestException {
@@ -193,7 +215,7 @@ public class LockManager {
         // synchronized block elsewhere if you wish.
         boolean shouldBlock = false;
         synchronized (this) {
-            
+
         }
         if (shouldBlock) {
             transaction.block();
@@ -203,7 +225,7 @@ public class LockManager {
     /**
      * Release `transaction`'s lock on `name`. Error checking must be done
      * before the lock is released.
-     *
+     * <p>
      * The resource name's queue should be processed after this call. If any
      * requests in the queue have locks to be released, those should be
      * released, and the corresponding queues also processed.
@@ -215,7 +237,7 @@ public class LockManager {
         // TODO(proj4_part1): implement
         // You may modify any part of this method.
         synchronized (this) {
-            
+
         }
     }
 
@@ -223,22 +245,22 @@ public class LockManager {
      * Promote a transaction's lock on `name` to `newLockType` (i.e. change
      * the transaction's lock on `name` from the current lock type to
      * `newLockType`, if its a valid substitution).
-     *
+     * <p>
      * Error checking must be done before any locks are changed. If the new lock
      * is not compatible with another transaction's lock on the resource, the
      * transaction is blocked and the request is placed at the FRONT of the
      * resource's queue.
-     *
+     * <p>
      * A lock promotion should NOT change the acquisition time of the lock, i.e.
      * if a transaction acquired locks in the order: S(A), X(B), promote X(A),
      * the lock on A is considered to have been acquired before the lock on B.
      *
      * @throws DuplicateLockRequestException if `transaction` already has a
-     * `newLockType` lock on `name`
-     * @throws NoLockHeldException if `transaction` has no lock on `name`
-     * @throws InvalidLockException if the requested lock type is not a
-     * promotion. A promotion from lock type A to lock type B is valid if and
-     * only if B is substitutable for A, and B is not equal to A.
+     *                                       `newLockType` lock on `name`
+     * @throws NoLockHeldException           if `transaction` has no lock on `name`
+     * @throws InvalidLockException          if the requested lock type is not a
+     *                                       promotion. A promotion from lock type A to lock type B is valid if and
+     *                                       only if B is substitutable for A, and B is not equal to A.
      */
     public void promote(TransactionContext transaction, ResourceName name,
                         LockType newLockType)
@@ -247,7 +269,7 @@ public class LockManager {
         // You may modify any part of this method.
         boolean shouldBlock = false;
         synchronized (this) {
-            
+
         }
         if (shouldBlock) {
             transaction.block();
