@@ -307,6 +307,7 @@ public class TestLockType {
         assertFalse(LockType.substitutable(LockType.S, LockType.IS));
         assertFalse(LockType.substitutable(LockType.X, LockType.IS));
         assertFalse(LockType.substitutable(LockType.SIX, LockType.IS));
+
     }
 
 }
