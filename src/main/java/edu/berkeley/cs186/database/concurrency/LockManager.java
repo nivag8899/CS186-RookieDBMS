@@ -106,6 +106,8 @@ public class LockManager {
          */
         public void releaseLock(Lock lock) {
             // TODO(proj4_part1): implement
+            long thisTransNum = lock.transactionNum;
+            transactionLocks.get(thisTransNum).remove(lock);
             return;
         }
 
