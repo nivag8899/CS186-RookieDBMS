@@ -21,9 +21,21 @@ public enum LockType {
         if (a == null || b == null) {
             throw new NullPointerException("null lock type");
         }
-        // TODO(proj4_part1): implement
-
-        return false;
+        if(a == LockType.NL){
+            return true;
+        } else if (a == LockType.IS) {
+            return b != LockType.X;
+        } else if (a == LockType.S) {
+            return b == LockType.NL || b == LockType.IS || b == LockType.S;
+        } else if (a == LockType.X) {
+            return b == LockType.NL;
+        } else if (a == LockType.IX) {
+            return b != LockType.S && b != LockType.SIX && b != LockType.X;
+        } else if (a == LockType.SIX) {
+            return b == LockType.NL || b == LockType.IS;
+        } else {
+            throw new UnsupportedOperationException("bad lock type");
+        }
     }
 
     /**

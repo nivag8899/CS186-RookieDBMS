@@ -34,7 +34,6 @@ public class LockManager {
     // transactionLocks is a mapping from transaction number to a list of lock
     // objects held by that transaction.
     private Map<Long, List<Lock>> transactionLocks = new HashMap<>();
-
     // resourceEntries is a mapping from resource names to a ResourceEntry
     // object, which contains a list of Locks on the object, as well as a
     // queue for requests on that resource.
