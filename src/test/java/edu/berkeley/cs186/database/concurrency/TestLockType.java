@@ -300,6 +300,13 @@ public class TestLockType {
         assertFalse(LockType.substitutable(LockType.X, LockType.IX));
         assertFalse(LockType.substitutable(LockType.SIX, LockType.IX));
         assertFalse(LockType.substitutable(LockType.IS, LockType.IX));
+
+        // IS substitutability sanity checks
+        assertTrue(LockType.substitutable(LockType.IX, LockType.IS));
+        assertTrue(LockType.substitutable(LockType.IS, LockType.IS));
+        assertFalse(LockType.substitutable(LockType.S, LockType.IS));
+        assertFalse(LockType.substitutable(LockType.X, LockType.IS));
+        assertFalse(LockType.substitutable(LockType.SIX, LockType.IS));
     }
 
 }
