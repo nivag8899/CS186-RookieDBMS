@@ -128,6 +128,13 @@ public class TestLockType {
                 assertFalse(LockType.canBeParentLock(LockType.S, lockType));
             }
         }
+
+        // X canBeParent sanity checks
+        for (LockType lockType : LockType.values()) {
+            if (lockType != LockType.NL) {
+                assertFalse(LockType.canBeParentLock(LockType.X, lockType));
+            }
+        }
     }
 
     /**
