@@ -36,6 +36,7 @@ public enum LockType {
         } else {
             throw new UnsupportedOperationException("bad lock type");
         }
+
     }
 
     /**

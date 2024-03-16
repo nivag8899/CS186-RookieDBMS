@@ -62,10 +62,13 @@ public class LockManager {
                 if (lockIterator.transactionNum == except) {
                     continue;
                 }
-                if (!LockType.compatible(lockIterator.lockType, lockType)) return false;
+                if (!LockType.compatible(lockIterator.lockType, lockType))
+                    return false;
             }
             return true;
         }
+
+
 
         /**
          * Gives the transaction the lock `lock`. Assumes that the lock is
@@ -139,10 +142,11 @@ public class LockManager {
                 request = requestIterator.next();
                 if (checkCompatible(request.lock.lockType, request.transaction.getTransNum())) {
                     waitingQueue.removeFirst();
+                    grantOrUpdateLock(request.lock);
                     for (Lock lockIterator : request.releasedLocks) {
                         release(request.transaction, lockIterator.name);
                     }
-                    grantOrUpdateLock(request.lock);
+                    request.transaction.unblock();
                 } else {
                     break;
                 }
@@ -289,6 +293,7 @@ public class LockManager {
             } else {
                 targetEntry.grantOrUpdateLock(lock);
             }
+
         }
         if (shouldBlock) {
             transaction.block();
