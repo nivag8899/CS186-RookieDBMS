@@ -205,18 +205,18 @@ public class LockManager {
      * @throws NoLockHeldException           if `transaction` doesn't hold a lock on one
      *                                       or more of the names in `releaseNames`
      */
-    public void acquireAndRelease(TransactionContext transaction, ResourceName resourceName, LockType requestedLockType, List<ResourceName> namesToRelease)
+    public void acquireAndRelease(TransactionContext transaction, ResourceName name, LockType lockType, List<ResourceName> releaseNames)
             throws DuplicateLockRequestException, NoLockHeldException {
         long thisTransNum = transaction.getTransNum();
         synchronized (this) {
-            ResourceEntry targetEntry = getResourceEntry(resourceName);
-            handleDuplicateLockRequest(targetEntry, thisTransNum, requestedLockType, resourceName);
+            ResourceEntry targetEntry = getResourceEntry(name);
+            handleDuplicateLockRequest(targetEntry, thisTransNum, lockType, name);
 
-            if (!targetEntry.checkCompatible(requestedLockType, thisTransNum)) {
-                prepareAndQueueLockRequest(transaction, resourceName, requestedLockType, namesToRelease);
+            if (!targetEntry.checkCompatible(lockType, thisTransNum)) {
+                prepareAndQueueLockRequest(transaction, name, lockType, releaseNames);
             } else {
-                targetEntry.grantOrUpdateLock(new Lock(resourceName, requestedLockType, thisTransNum));
-                releaseSpecifiedLocks(transaction, namesToRelease, resourceName, thisTransNum);
+                targetEntry.grantOrUpdateLock(new Lock(name, lockType, thisTransNum));
+                releaseSpecifiedLocks(transaction, releaseNames, name, thisTransNum);
             }
         }
     }
@@ -239,7 +239,8 @@ public class LockManager {
         transaction.prepareBlock();
     }
 
-    private void releaseSpecifiedLocks(TransactionContext transaction, List<ResourceName> releaseNames, ResourceName resourceName, long thisTransNum) throws NoLockHeldException {
+    private void releaseSpecifiedLocks(TransactionContext transaction, List<ResourceName> releaseNames, ResourceName resourceName, long thisTransNum)
+            throws NoLockHeldException {
         for (ResourceName nameToRelease : releaseNames) {
             if (nameToRelease.equals(resourceName)) continue;
             ResourceEntry entryToRelease = getResourceEntry(nameToRelease);
@@ -268,9 +269,20 @@ public class LockManager {
         // code within the given synchronized block and are allowed to move the
         // synchronized block elsewhere if you wish.
         boolean shouldBlock = false;
-        long transNum = transaction.getTransNum();
+        long thisTransNum = transaction.getTransNum();
         synchronized (this) {
+            ResourceEntry targetEntry = getResourceEntry(name);
+            handleDuplicateLockRequest(targetEntry, thisTransNum, requestedLockType, resourceName);
 
+            Lock lock = new Lock(name, lockType, thisTransNum);
+            if (!targetEntry.waitingQueue.isEmpty() || !targetEntry.checkCompatible(lockType, thisTransNum)) {
+                shouldBlock = true;
+                LockRequest request = new LockRequest(transaction, lock);
+                targetEntry.addToQueue(request, false);
+                transaction.prepareBlock();
+            } else {
+                targetEntry.grantOrUpdateLock(lock);
+            }
         }
         if (shouldBlock) {
             transaction.block();
