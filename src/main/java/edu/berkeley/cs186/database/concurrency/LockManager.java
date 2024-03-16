@@ -227,6 +227,13 @@ public class LockManager {
         }
     }
 
+    private void handleNoLockHeld(ResourceEntry entry, long thisTransNum, ResourceName resourceName)
+            throws DuplicateLockRequestException {
+        if (Objects.equals(entry.getTransactionLockType(thisTransNum), LockType.NL)) {
+            throw new NoLockHeldException("Transaction " + thisTransNum + " does not hold any lock on " + resourceName);
+        }
+    }
+
     private void prepareAndQueueLockRequest(TransactionContext transaction, ResourceName resourceName, LockType lockType, List<ResourceName> releaseNames) {
         List<Lock> locksToRelease = new ArrayList<>();
         for (ResourceName nameToRelease : releaseNames) {
@@ -243,9 +250,7 @@ public class LockManager {
         for (ResourceName nameToRelease : releaseNames) {
             if (nameToRelease.equals(resourceName)) continue;
             ResourceEntry entryToRelease = getResourceEntry(nameToRelease);
-            if (Objects.equals(entryToRelease.getTransactionLockType(thisTransNum), LockType.NL)) {
-                throw new NoLockHeldException("Transaction " + thisTransNum + " does not hold any lock on " + nameToRelease);
-            }
+            handleNoLockHeld(entryToRelease, thisTransNum, resourceName);
             release(transaction, nameToRelease);
         }
     }
@@ -305,13 +310,10 @@ public class LockManager {
         long thisTransNum = transaction.getTransNum();
         synchronized (this) {
             ResourceEntry targetEntry = getResourceEntry(name);
-            if (Objects.equals(targetEntry.getTransactionLockType(thisTransNum), LockType.NL)) {
-                throw new NoLockHeldException("Transaction " + thisTransNum + " does not hold any lock on " + name);
-            }
+            handleNoLockHeld(targetEntry, thisTransNum, name);
             LockType lockType = targetEntry.getTransactionLockType(thisTransNum);
             Lock lock = new Lock(name, lockType, thisTransNum);
             targetEntry.releaseLock(lock);
-
         }
     }
 
