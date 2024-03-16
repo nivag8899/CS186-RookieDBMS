@@ -62,8 +62,7 @@ public class LockManager {
                 if (lockIterator.transactionNum == except) {
                     continue;
                 }
-                if (!LockType.compatible(lockIterator.lockType, lockType))
-                    return false;
+                if (!LockType.compatible(lockIterator.lockType, lockType)) return false;
             }
             return true;
         }
@@ -140,7 +139,9 @@ public class LockManager {
                 request = requestIterator.next();
                 if (checkCompatible(request.lock.lockType, request.transaction.getTransNum())) {
                     waitingQueue.removeFirst();
-                    releaseLock(request.lock);
+                    for (Lock lockIterator : request.releasedLocks) {
+                        release(request.transaction, lockIterator.name);
+                    }
                     grantOrUpdateLock(request.lock);
                 } else {
                     break;
@@ -165,8 +166,7 @@ public class LockManager {
 
         @Override
         public String toString() {
-            return "Active Locks: " + Arrays.toString(this.locks.toArray()) +
-                    ", Queue: " + Arrays.toString(this.waitingQueue.toArray());
+            return "Active Locks: " + Arrays.toString(this.locks.toArray()) + ", Queue: " + Arrays.toString(this.waitingQueue.toArray());
         }
     }
 
@@ -205,21 +205,51 @@ public class LockManager {
      * @throws NoLockHeldException           if `transaction` doesn't hold a lock on one
      *                                       or more of the names in `releaseNames`
      */
-    public void acquireAndRelease(TransactionContext transaction, ResourceName name,
-                                  LockType lockType, List<ResourceName> releaseNames)
+    public void acquireAndRelease(TransactionContext transaction, ResourceName resourceName, LockType requestedLockType, List<ResourceName> namesToRelease)
             throws DuplicateLockRequestException, NoLockHeldException {
-        // TODO(proj4_part1): implement
-        // You may modify any part of this method. You are not required to keep
-        // all your code within the given synchronized block and are allowed to
-        // move the synchronized block elsewhere if you wish.
-        boolean shouldBlock = false;
+        long thisTransNum = transaction.getTransNum();
         synchronized (this) {
+            ResourceEntry targetEntry = getResourceEntry(resourceName);
+            handleDuplicateLockRequest(targetEntry, thisTransNum, requestedLockType, resourceName);
 
-        }
-        if (shouldBlock) {
-            transaction.block();
+            if (!targetEntry.checkCompatible(requestedLockType, thisTransNum)) {
+                prepareAndQueueLockRequest(transaction, resourceName, requestedLockType, namesToRelease);
+            } else {
+                targetEntry.grantOrUpdateLock(new Lock(resourceName, requestedLockType, thisTransNum));
+                releaseSpecifiedLocks(transaction, namesToRelease, resourceName, thisTransNum);
+            }
         }
     }
+
+    private void handleDuplicateLockRequest(ResourceEntry entry, long thisTransNum, LockType lockType, ResourceName resourceName)
+            throws DuplicateLockRequestException {
+        if (entry.getTransactionLockType(thisTransNum) == lockType) {
+            throw new DuplicateLockRequestException("Transaction " + thisTransNum + " already holds a " + lockType + " lock on " + resourceName);
+        }
+    }
+
+    private void prepareAndQueueLockRequest(TransactionContext transaction, ResourceName resourceName, LockType lockType, List<ResourceName> releaseNames) {
+        List<Lock> locksToRelease = new ArrayList<>();
+        for (ResourceName nameToRelease : releaseNames) {
+            LockType typeToRelease = getResourceEntry(nameToRelease).getTransactionLockType(transaction.getTransNum());
+            locksToRelease.add(new Lock(nameToRelease, typeToRelease, transaction.getTransNum()));
+        }
+        LockRequest request = new LockRequest(transaction, new Lock(resourceName, lockType, transaction.getTransNum()), locksToRelease);
+        getResourceEntry(resourceName).addToQueue(request, true);
+        transaction.prepareBlock();
+    }
+
+    private void releaseSpecifiedLocks(TransactionContext transaction, List<ResourceName> releaseNames, ResourceName resourceName, long thisTransNum) throws NoLockHeldException {
+        for (ResourceName nameToRelease : releaseNames) {
+            if (nameToRelease.equals(resourceName)) continue;
+            ResourceEntry entryToRelease = getResourceEntry(nameToRelease);
+            if (entryToRelease.getTransactionLockType(thisTransNum) == LockType.NL) {
+                throw new NoLockHeldException("Transaction " + thisTransNum + " does not hold any lock on " + nameToRelease);
+            }
+            release(transaction, nameToRelease);
+        }
+    }
+
 
     /**
      * Acquire a `lockType` lock on `name`, for transaction `transaction`.
@@ -232,13 +262,13 @@ public class LockManager {
      * @throws DuplicateLockRequestException if a lock on `name` is held by
      *                                       `transaction`
      */
-    public void acquire(TransactionContext transaction, ResourceName name,
-                        LockType lockType) throws DuplicateLockRequestException {
+    public void acquire(TransactionContext transaction, ResourceName name, LockType lockType) throws DuplicateLockRequestException {
         // TODO(proj4_part1): implement
         // You may modify any part of this method. You are not required to keep all your
         // code within the given synchronized block and are allowed to move the
         // synchronized block elsewhere if you wish.
         boolean shouldBlock = false;
+        long transNum = transaction.getTransNum();
         synchronized (this) {
 
         }
@@ -257,10 +287,10 @@ public class LockManager {
      *
      * @throws NoLockHeldException if no lock on `name` is held by `transaction`
      */
-    public void release(TransactionContext transaction, ResourceName name)
-            throws NoLockHeldException {
+    public void release(TransactionContext transaction, ResourceName name) throws NoLockHeldException {
         // TODO(proj4_part1): implement
         // You may modify any part of this method.
+        long transNum = transaction.getTransNum();
         synchronized (this) {
 
         }
@@ -287,12 +317,11 @@ public class LockManager {
      *                                       promotion. A promotion from lock type A to lock type B is valid if and
      *                                       only if B is substitutable for A, and B is not equal to A.
      */
-    public void promote(TransactionContext transaction, ResourceName name,
-                        LockType newLockType)
-            throws DuplicateLockRequestException, NoLockHeldException, InvalidLockException {
+    public void promote(TransactionContext transaction, ResourceName name, LockType newLockType) throws DuplicateLockRequestException, NoLockHeldException, InvalidLockException {
         // TODO(proj4_part1): implement
         // You may modify any part of this method.
         boolean shouldBlock = false;
+        long transNum = transaction.getTransNum();
         synchronized (this) {
 
         }
@@ -307,7 +336,6 @@ public class LockManager {
      */
     public synchronized LockType getLockType(TransactionContext transaction, ResourceName name) {
         // TODO(proj4_part1): implement
-        ResourceEntry resourceEntry = getResourceEntry(name);
         return LockType.NL;
     }
 
@@ -322,8 +350,7 @@ public class LockManager {
      * Returns the list of locks held by `transaction`, in order of acquisition.
      */
     public synchronized List<Lock> getLocks(TransactionContext transaction) {
-        return new ArrayList<>(transactionLocks.getOrDefault(transaction.getTransNum(),
-                Collections.emptyList()));
+        return new ArrayList<>(transactionLocks.getOrDefault(transaction.getTransNum(), Collections.emptyList()));
     }
 
     /**
