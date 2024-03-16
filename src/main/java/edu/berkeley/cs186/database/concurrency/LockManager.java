@@ -211,7 +211,6 @@ public class LockManager {
         synchronized (this) {
             ResourceEntry targetEntry = getResourceEntry(name);
             handleDuplicateLockRequest(targetEntry, thisTransNum, lockType, name);
-
             if (!targetEntry.checkCompatible(lockType, thisTransNum)) {
                 prepareAndQueueLockRequest(transaction, name, lockType, releaseNames);
             } else {
@@ -263,7 +262,8 @@ public class LockManager {
      * @throws DuplicateLockRequestException if a lock on `name` is held by
      *                                       `transaction`
      */
-    public void acquire(TransactionContext transaction, ResourceName name, LockType lockType) throws DuplicateLockRequestException {
+    public void acquire(TransactionContext transaction, ResourceName name, LockType lockType)
+            throws DuplicateLockRequestException {
         // TODO(proj4_part1): implement
         // You may modify any part of this method. You are not required to keep all your
         // code within the given synchronized block and are allowed to move the
@@ -272,8 +272,7 @@ public class LockManager {
         long thisTransNum = transaction.getTransNum();
         synchronized (this) {
             ResourceEntry targetEntry = getResourceEntry(name);
-            handleDuplicateLockRequest(targetEntry, thisTransNum, requestedLockType, resourceName);
-
+            handleDuplicateLockRequest(targetEntry, thisTransNum, lockType, name);
             Lock lock = new Lock(name, lockType, thisTransNum);
             if (!targetEntry.waitingQueue.isEmpty() || !targetEntry.checkCompatible(lockType, thisTransNum)) {
                 shouldBlock = true;
@@ -299,7 +298,8 @@ public class LockManager {
      *
      * @throws NoLockHeldException if no lock on `name` is held by `transaction`
      */
-    public void release(TransactionContext transaction, ResourceName name) throws NoLockHeldException {
+    public void release(TransactionContext transaction, ResourceName name)
+            throws NoLockHeldException {
         // TODO(proj4_part1): implement
         // You may modify any part of this method.
         long transNum = transaction.getTransNum();
