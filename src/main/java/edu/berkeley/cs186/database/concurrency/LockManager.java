@@ -222,7 +222,7 @@ public class LockManager {
 
     private void handleDuplicateLockRequest(ResourceEntry entry, long thisTransNum, LockType lockType, ResourceName resourceName)
             throws DuplicateLockRequestException {
-        if (entry.getTransactionLockType(thisTransNum) == lockType) {
+        if (Objects.equals(entry.getTransactionLockType(thisTransNum), lockType)) {
             throw new DuplicateLockRequestException("Transaction " + thisTransNum + " already holds a " + lockType + " lock on " + resourceName);
         }
     }
@@ -243,7 +243,7 @@ public class LockManager {
         for (ResourceName nameToRelease : releaseNames) {
             if (nameToRelease.equals(resourceName)) continue;
             ResourceEntry entryToRelease = getResourceEntry(nameToRelease);
-            if (entryToRelease.getTransactionLockType(thisTransNum) == LockType.NL) {
+            if (Objects.equals(entryToRelease.getTransactionLockType(thisTransNum), LockType.NL)) {
                 throw new NoLockHeldException("Transaction " + thisTransNum + " does not hold any lock on " + nameToRelease);
             }
             release(transaction, nameToRelease);
@@ -302,8 +302,15 @@ public class LockManager {
             throws NoLockHeldException {
         // TODO(proj4_part1): implement
         // You may modify any part of this method.
-        long transNum = transaction.getTransNum();
+        long thisTransNum = transaction.getTransNum();
         synchronized (this) {
+            ResourceEntry targetEntry = getResourceEntry(name);
+            if (Objects.equals(targetEntry.getTransactionLockType(thisTransNum), LockType.NL)) {
+                throw new NoLockHeldException("Transaction " + thisTransNum + " does not hold any lock on " + name);
+            }
+            LockType lockType = targetEntry.getTransactionLockType(thisTransNum);
+            Lock lock = new Lock(name, lockType, thisTransNum);
+            targetEntry.releaseLock(lock);
 
         }
     }
