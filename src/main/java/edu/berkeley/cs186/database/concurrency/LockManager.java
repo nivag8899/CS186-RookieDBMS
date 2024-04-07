@@ -378,7 +378,6 @@ public class LockManager {
             handleDuplicateLockRequest(resourceEntry,thisTransNum,newLockType,name);
             handleNoLockHeld(resourceEntry,thisTransNum,name);
             handleInvalidLock(resourceEntry,newLockType,thisTransNum);
-
             Lock newLock = new Lock(name,newLockType,thisTransNum);
             if (!resourceEntry.checkCompatible(newLockType, thisTransNum)) {
                 shouldBlock = true;
