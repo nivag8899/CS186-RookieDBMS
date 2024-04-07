@@ -81,11 +81,18 @@ public class LockManager {
                 if (Objects.equals(lockIterator.transactionNum, lock.transactionNum)) {
                     lockIterator.lockType = lock.lockType;
                     updateLockHelper(lock);
+                    return;
                 }
             }
-            addLockHelper(lock);
             locks.add(lock);
+            addLockHelper(lock);
             return;
+        }
+
+        private void addLockHelper(Lock lock) {
+            long thisTransNum = lock.transactionNum;
+            transactionLocks.putIfAbsent(thisTransNum, new ArrayList<>());
+            transactionLocks.get(thisTransNum).add(lock);
         }
 
         private void updateLockHelper(Lock lock) {
@@ -97,11 +104,8 @@ public class LockManager {
             }
         }
 
-        private void addLockHelper(Lock lock) {
-            long thisTransNum = lock.transactionNum;
-            transactionLocks.putIfAbsent(thisTransNum, new ArrayList<>());
-            transactionLocks.get(thisTransNum).add(lock);
-        }
+
+
 
         /**
          * Releases the lock `lock` and processes the queue. Assumes that the
@@ -136,6 +140,7 @@ public class LockManager {
          * granted, the transaction that made the request can be unblocked.
          */
         private void processQueue() {
+            // TODO(proj4_part1): implement
             Iterator<LockRequest> requestIterator = waitingQueue.iterator();
             LockRequest request;
             while (requestIterator.hasNext()) {
@@ -151,7 +156,7 @@ public class LockManager {
                     break;
                 }
             }
-            // TODO(proj4_part1): implement
+
             return;
         }
 
@@ -211,18 +216,28 @@ public class LockManager {
      */
     public void acquireAndRelease(TransactionContext transaction, ResourceName name, LockType lockType, List<ResourceName> releaseNames)
             throws DuplicateLockRequestException, NoLockHeldException {
+        // TODO(proj4_part1): implement
+        // You may modify any part of this method. You are not required to keep
+        // all your code within the given synchronized block and are allowed to
+        // move the synchronized block elsewhere if you wish.
         long thisTransNum = transaction.getTransNum();
+        boolean shouldBlock = false;
         synchronized (this) {
             ResourceEntry targetEntry = getResourceEntry(name);
             handleDuplicateLockRequest(targetEntry, thisTransNum, lockType, name);
             if (!targetEntry.checkCompatible(lockType, thisTransNum)) {
+                shouldBlock = true;
                 prepareAndQueueLockRequest(transaction, name, lockType, releaseNames);
             } else {
                 targetEntry.grantOrUpdateLock(new Lock(name, lockType, thisTransNum));
                 releaseSpecifiedLocks(transaction, releaseNames, name, thisTransNum);
             }
         }
+        if (shouldBlock) {
+            transaction.block();
+        }
     }
+
 
     private void handleDuplicateLockRequest(ResourceEntry entry, long thisTransNum, LockType lockType, ResourceName resourceName)
             throws DuplicateLockRequestException {
@@ -325,6 +340,7 @@ public class LockManager {
         }
     }
 
+
     /**
      * Promote a transaction's lock on `name` to `newLockType` (i.e. change
      * the transaction's lock on `name` from the current lock type to
@@ -358,6 +374,7 @@ public class LockManager {
             transaction.block();
         }
     }
+
 
     /**
      * Return the type of lock `transaction` has on `name` or NL if no lock is

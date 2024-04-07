@@ -99,6 +99,19 @@ public class LockContext {
         if (readonly) {
             throw new UnsupportedOperationException("The context is readonly");
         }
+        if (this.parent != null && !LockType.canBeParentLock(parent.getEffectiveLockType(transaction), lockType)) {
+            throw new InvalidLockException("the lock request is invalid");
+        }
+
+        lockman.acquire(transaction, name, lockType);
+
+        Long transNum = transaction.getTransNum();
+        LockContext parentContext = this.parent;
+
+        while (parentContext != null) {
+            parentContext.numChildLocks.merge(transNum, 1, Integer::sum);
+            parentContext = parentContext.parent;
+        }
         return;
     }
 
