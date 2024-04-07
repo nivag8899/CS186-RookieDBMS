@@ -253,6 +253,12 @@ public class LockManager {
         }
     }
 
+    private void handleInvalidLock(ResourceEntry entry,LockType lockType,long thisTransNum) throws InvalidLockException{
+        if (!LockType.substitutable(lockType, entry.getTransactionLockType(thisTransNum))) {
+            throw new InvalidLockException("the new lock type is not substitutable for the old lock");
+        }
+    }
+
     private void prepareAndQueueLockRequest(TransactionContext transaction, ResourceName resourceName, LockType lockType, List<ResourceName> releaseNames) {
         List<Lock> locksToRelease = new ArrayList<>();
         for (ResourceName nameToRelease : releaseNames) {
@@ -366,9 +372,22 @@ public class LockManager {
         // TODO(proj4_part1): implement
         // You may modify any part of this method.
         boolean shouldBlock = false;
-        long transNum = transaction.getTransNum();
+        long thisTransNum = transaction.getTransNum();
         synchronized (this) {
+            ResourceEntry resourceEntry = getResourceEntry(name);
+            handleDuplicateLockRequest(resourceEntry,thisTransNum,newLockType,name);
+            handleNoLockHeld(resourceEntry,thisTransNum,name);
+            handleInvalidLock(resourceEntry,newLockType,thisTransNum);
 
+            Lock newLock = new Lock(name,newLockType,thisTransNum);
+            if (!resourceEntry.checkCompatible(newLockType, thisTransNum)) {
+                shouldBlock = true;
+                LockRequest request = new LockRequest(transaction, newLock);
+                resourceEntry.addToQueue(request, true);
+                transaction.prepareBlock();
+            } else {
+                resourceEntry.grantOrUpdateLock(newLock);
+            }
         }
         if (shouldBlock) {
             transaction.block();
