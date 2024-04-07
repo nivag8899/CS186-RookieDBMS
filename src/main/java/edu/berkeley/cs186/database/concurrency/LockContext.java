@@ -40,12 +40,33 @@ public class LockContext {
 
     //error checking
 
-    public void handleUnsupportedOperation() {
+    private void handleUnsupportedOperation() {
         if (readonly) {
             throw new UnsupportedOperationException("It is readonly");
         }
     }
 
+    private void handleSIXAncestor(TransactionContext transaction, LockType lockType) {
+        if (hasSIXAncestor(transaction) &&
+                (lockType.equals(LockType.S) || lockType.equals(LockType.IS))) {
+            throw new InvalidLockException("Have SIX ancestor.");
+        }
+    }
+
+    private void handleDuplicateLockRequest(TransactionContext transaction, LockType lockType) {
+        if (lockman.getLockType(transaction, name) != LockType.NL) {
+            throw new DuplicateLockRequestException("Duplicate Lock");
+        }
+    }
+
+    private void handleInvalidLock(TransactionContext transaction, LockType lockType) {
+        if (parentContext() != null) {
+            LockType parentLockType = lockman.getLockType(transaction, parent.getResourceName());
+            if (!LockType.canBeParentLock(parentLockType, lockType)) {
+                throw new InvalidLockException("Invalid Lock Request");
+            }
+        }
+    }
 
     public LockContext(LockManager lockman, LockContext parent, String name) {
         this(lockman, parent, name, false);
@@ -104,15 +125,10 @@ public class LockContext {
             throws InvalidLockException, DuplicateLockRequestException {
         // TODO(proj4_part2): implement
         handleUnsupportedOperation();
-        if (lockman.getLockType(transaction, name) != LockType.NL) {
-            throw new DuplicateLockRequestException("Duplicate Lock");
-        }
-        if (this.parent != null) {
-            LockType parentLockType = lockman.getLockType(transaction, parent.getResourceName());
-            if (!LockType.canBeParentLock(parentLockType, lockType)) {
-                throw new InvalidLockException("Invalid Lock Request");
-            }
-        }
+        handleSIXAncestor(transaction, lockType);
+        handleDuplicateLockRequest(transaction, lockType);
+        handleInvalidLock(transaction,lockType);
+
         this.lockman.acquire(transaction, name, lockType);
         if (parentContext() != null) {
             parentContext().numChildLocks.putIfAbsent(transaction.getTransNum(), 0);
@@ -238,6 +254,13 @@ public class LockContext {
      */
     private boolean hasSIXAncestor(TransactionContext transaction) {
         // TODO(proj4_part2): implement
+        LockContext parentContextIterator = parentContext();
+        while (parentContextIterator != null) {
+            if (lockman.getLockType(transaction, parentContextIterator.getResourceName()) == LockType.SIX) {
+                return true;
+            }
+            parentContextIterator = parentContextIterator.parentContext();
+        }
         return false;
     }
 
