@@ -2,10 +2,7 @@ package edu.berkeley.cs186.database.concurrency;
 
 import edu.berkeley.cs186.database.TransactionContext;
 
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -41,6 +38,15 @@ public class LockContext {
     // Whether or not any new child LockContexts should be marked readonly.
     protected boolean childLocksDisabled;
 
+    //error checking
+
+    public void handleUnsupportedOperation() {
+        if (readonly) {
+            throw new UnsupportedOperationException("It is readonly");
+        }
+    }
+
+
     public LockContext(LockManager lockman, LockContext parent, String name) {
         this(lockman, parent, name, false);
     }
@@ -59,6 +65,7 @@ public class LockContext {
         this.children = new ConcurrentHashMap<>();
         this.childLocksDisabled = readonly;
     }
+
 
     /**
      * Gets a lock context corresponding to `name` from a lock manager.
@@ -84,51 +91,52 @@ public class LockContext {
 
     /**
      * Acquire a `lockType` lock, for transaction `transaction`.
-     *
+     * <p>
      * Note: you must make any necessary updates to numChildLocks, or else calls
      * to LockContext#getNumChildren will not work properly.
      *
-     * @throws InvalidLockException if the request is invalid
+     * @throws InvalidLockException          if the request is invalid
      * @throws DuplicateLockRequestException if a lock is already held by the
-     * transaction.
+     *                                       transaction.
      * @throws UnsupportedOperationException if context is readonly
      */
     public void acquire(TransactionContext transaction, LockType lockType)
             throws InvalidLockException, DuplicateLockRequestException {
         // TODO(proj4_part2): implement
-        if (readonly) {
-            throw new UnsupportedOperationException("The context is readonly");
+        handleUnsupportedOperation();
+        if (lockman.getLockType(transaction, name) != LockType.NL) {
+            throw new DuplicateLockRequestException("Duplicate Lock");
         }
-        if (this.parent != null && !LockType.canBeParentLock(parent.getEffectiveLockType(transaction), lockType)) {
-            throw new InvalidLockException("the lock request is invalid");
+        if (this.parent != null) {
+            LockType parentLockType = lockman.getLockType(transaction, parent.getResourceName());
+            if (!LockType.canBeParentLock(parentLockType, lockType)) {
+                throw new InvalidLockException("Invalid Lock Request");
+            }
         }
-
-        lockman.acquire(transaction, name, lockType);
-
-        Long transNum = transaction.getTransNum();
-        LockContext parentContext = this.parent;
-
-        while (parentContext != null) {
-            parentContext.numChildLocks.merge(transNum, 1, Integer::sum);
-            parentContext = parentContext.parent;
+        this.lockman.acquire(transaction, name, lockType);
+        if (parentContext() != null) {
+            parentContext().numChildLocks.putIfAbsent(transaction.getTransNum(), 0);
+            parentContext().numChildLocks.put(transaction.getTransNum(), parentContext().getNumChildren(transaction) + 1);
         }
         return;
     }
 
+
     /**
      * Release `transaction`'s lock on `name`.
-     *
+     * <p>
      * Note: you *must* make any necessary updates to numChildLocks, or
      * else calls to LockContext#getNumChildren will not work properly.
      *
-     * @throws NoLockHeldException if no lock on `name` is held by `transaction`
-     * @throws InvalidLockException if the lock cannot be released because
-     * doing so would violate multigranularity locking constraints
+     * @throws NoLockHeldException           if no lock on `name` is held by `transaction`
+     * @throws InvalidLockException          if the lock cannot be released because
+     *                                       doing so would violate multigranularity locking constraints
      * @throws UnsupportedOperationException if context is readonly
      */
     public void release(TransactionContext transaction)
             throws NoLockHeldException, InvalidLockException {
         // TODO(proj4_part2): implement
+        handleUnsupportedOperation();
 
         return;
     }
@@ -137,25 +145,25 @@ public class LockContext {
      * Promote `transaction`'s lock to `newLockType`. For promotion to SIX from
      * IS/IX, all S and IS locks on descendants must be simultaneously
      * released. The helper function sisDescendants may be helpful here.
-     *
+     * <p>
      * Note: you *must* make any necessary updates to numChildLocks, or else
      * calls to LockContext#getNumChildren will not work properly.
      *
      * @throws DuplicateLockRequestException if `transaction` already has a
-     * `newLockType` lock
-     * @throws NoLockHeldException if `transaction` has no lock
-     * @throws InvalidLockException if the requested lock type is not a
-     * promotion or promoting would cause the lock manager to enter an invalid
-     * state (e.g. IS(parent), X(child)). A promotion from lock type A to lock
-     * type B is valid if B is substitutable for A and B is not equal to A, or
-     * if B is SIX and A is IS/IX/S, and invalid otherwise. hasSIXAncestor may
-     * be helpful here.
+     *                                       `newLockType` lock
+     * @throws NoLockHeldException           if `transaction` has no lock
+     * @throws InvalidLockException          if the requested lock type is not a
+     *                                       promotion or promoting would cause the lock manager to enter an invalid
+     *                                       state (e.g. IS(parent), X(child)). A promotion from lock type A to lock
+     *                                       type B is valid if B is substitutable for A and B is not equal to A, or
+     *                                       if B is SIX and A is IS/IX/S, and invalid otherwise. hasSIXAncestor may
+     *                                       be helpful here.
      * @throws UnsupportedOperationException if context is readonly
      */
     public void promote(TransactionContext transaction, LockType newLockType)
             throws DuplicateLockRequestException, NoLockHeldException, InvalidLockException {
         // TODO(proj4_part2): implement
-
+        handleUnsupportedOperation();
         return;
     }
 
@@ -166,34 +174,35 @@ public class LockContext {
      * before this call must still be valid. You should only make *one* mutating
      * call to the lock manager, and should only request information about
      * TRANSACTION from the lock manager.
-     *
+     * <p>
      * For example, if a transaction has the following locks:
-     *
-     *                    IX(database)
-     *                    /         \
-     *               IX(table1)    S(table2)
-     *                /      \
-     *    S(table1 page3)  X(table1 page5)
-     *
+     * <p>
+     * IX(database)
+     * /         \
+     * IX(table1)    S(table2)
+     * /      \
+     * S(table1 page3)  X(table1 page5)
+     * <p>
      * then after table1Context.escalate(transaction) is called, we should have:
-     *
-     *                    IX(database)
-     *                    /         \
-     *               X(table1)     S(table2)
-     *
+     * <p>
+     * IX(database)
+     * /         \
+     * X(table1)     S(table2)
+     * <p>
      * You should not make any mutating calls if the locks held by the
      * transaction do not change (such as when you call escalate multiple times
      * in a row).
-     *
+     * <p>
      * Note: you *must* make any necessary updates to numChildLocks of all
      * relevant contexts, or else calls to LockContext#getNumChildren will not
      * work properly.
      *
-     * @throws NoLockHeldException if `transaction` has no lock at this level
+     * @throws NoLockHeldException           if `transaction` has no lock at this level
      * @throws UnsupportedOperationException if context is readonly
      */
     public void escalate(TransactionContext transaction) throws NoLockHeldException {
         // TODO(proj4_part2): implement
+        handleUnsupportedOperation();
 
         return;
     }
@@ -223,6 +232,7 @@ public class LockContext {
     /**
      * Helper method to see if the transaction holds a SIX lock at an ancestor
      * of this context
+     *
      * @param transaction the transaction
      * @return true if holds a SIX at an ancestor, false if not
      */
@@ -234,6 +244,7 @@ public class LockContext {
     /**
      * Helper method to get a list of resourceNames of all locks that are S or
      * IS and are descendants of current context for the given transaction.
+     *
      * @param transaction the given transaction
      * @return a list of ResourceNames of descendants which the transaction
      * holds an S or IS lock.
