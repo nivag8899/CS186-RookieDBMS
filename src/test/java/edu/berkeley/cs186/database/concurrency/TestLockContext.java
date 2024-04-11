@@ -250,14 +250,9 @@ public class TestLockContext {
         dbLockContext.acquire(t1,LockType.IX);
         tableLockContext.acquire(t1,LockType.IS);
         pageLockContext.acquire(t1,LockType.S);
-        try{
-            dbLockContext.promote(t1,LockType.SIX);
-            fail();
-        }catch (InvalidLockException e){
-            assertEquals(0, dbLockContext.getNumChildren(t1));
-            assertEquals(0,tableLockContext.getNumChildren(t1));
-        }
-
+        dbLockContext.promote(t1,LockType.SIX);
+        assertEquals(0, dbLockContext.getNumChildren(t1));
+        assertEquals(0,tableLockContext.getNumChildren(t1));
     }
 
     @Test
