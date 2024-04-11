@@ -46,6 +46,11 @@ public class LockContext {
         }
     }
 
+    private  void handleNoop(TransactionContext transaction,LockType lockType){
+        if(transaction == null || lockType == LockType.NL)
+            throw new InvalidLockException("Noop");
+    }
+
     private void handleSIXAncestor(TransactionContext transaction, LockType lockType) {
         if (hasSIXAncestor(transaction) &&
                 (lockType.equals(LockType.S) || lockType.equals(LockType.IS))) {
