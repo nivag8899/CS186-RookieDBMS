@@ -1,6 +1,7 @@
 package edu.berkeley.cs186.database.concurrency;
 
 import edu.berkeley.cs186.database.TimeoutScaling;
+import edu.berkeley.cs186.database.Transaction;
 import edu.berkeley.cs186.database.TransactionContext;
 import edu.berkeley.cs186.database.categories.HiddenTests;
 import edu.berkeley.cs186.database.categories.Proj4Part2Tests;
@@ -360,12 +361,15 @@ public class TestLockContext {
     @Test
     @Category(PublicTests.class)
     public void testGetLockType() {
-        DeterministicRunner runner = new DeterministicRunner(4);
+        DeterministicRunner runner = new DeterministicRunner(5);
 
         TransactionContext t1 = transactions[1];
         TransactionContext t2 = transactions[2];
         TransactionContext t3 = transactions[3];
         TransactionContext t4 = transactions[4];
+        TransactionContext t5 = transactions[5];
+
+
 
         runner.run(0, () -> dbLockContext.acquire(t1, LockType.S));
         runner.run(1, () -> dbLockContext.acquire(t2, LockType.IS));
@@ -392,10 +396,16 @@ public class TestLockContext {
     @Test
     @Category(PublicTests.class)
     public void testEffectiveLockType() {
+        DeterministicRunner runner = new DeterministicRunner(2);
         TransactionContext t1 = transactions[1];
-        dbLockContext.acquire(t1,LockType.X);
-        assertEquals(LockType.X, dbLockContext.getExplicitLockType(t1));
-        assertEquals(LockType.X, tableLockContext.getExplicitLockType(t1));
+        TransactionContext t2 = transactions[2];
+
+        runner.run(0,() -> dbLockContext.acquire(t1,LockType.X));
+        runner.run(1, () -> dbLockContext.acquire(t2,LockType.SIX));
+
+        assertEquals(LockType.X, dbLockContext.getEffectiveLockType(t1));
+        assertEquals(LockType.X, tableLockContext.getEffectiveLockType(t1));
+        assertEquals(LockType.S, tableLockContext.getEffectiveLockType(t2));
     }
     @Test
     @Category(PublicTests.class)
