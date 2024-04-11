@@ -53,19 +53,53 @@ public class LockContext {
         }
     }
 
-    private void handleDuplicateLockRequest(TransactionContext transaction, LockType lockType) {
+    private void handleDuplicateLockRequest(TransactionContext transaction) {
         if (lockman.getLockType(transaction, name) != LockType.NL) {
             throw new DuplicateLockRequestException("Duplicate Lock");
         }
     }
 
-    private void handleInvalidLock(TransactionContext transaction, LockType lockType) {
-        if (parentContext() != null) {
-            LockType parentLockType = lockman.getLockType(transaction, parent.getResourceName());
-            if (!LockType.canBeParentLock(parentLockType, lockType)) {
-                throw new InvalidLockException("Invalid Lock Request");
+    private void handleInvalidLock(TransactionContext transaction, LockType lockType,int invalidType) {
+        if(invalidType == 1){ //acquire
+            if (parentContext() != null) {
+                LockType parentLockType = lockman.getLockType(transaction, parent.getResourceName());
+                if (!LockType.canBeParentLock(parentLockType, lockType)) {
+                    throw new InvalidLockException("Invalid Lock Request");
+                }
+            }
+        } else if (invalidType == 2) {
+            if (!numChildLocks.getOrDefault(transaction.getTransNum(), 0).equals(0)) {
+                throw new InvalidLockException("The lock cannot be released.");
             }
         }
+
+    }
+
+    private void handleNoLockHeld(TransactionContext transaction){
+        if (lockman.getLockType(transaction, name).equals(
+                LockType.NL
+        )) { throw new NoLockHeldException("There is no lock on " + name.toString()); }
+    }
+
+    private void NumChildLocksInc(TransactionContext transaction, LockContext parent) {
+        if (parent == null) {
+            return;
+        }
+        int NumParentLocks = parent.numChildLocks.getOrDefault(transaction.getTransNum(), 0);
+        parent.numChildLocks.put(transaction.getTransNum(), NumParentLocks + 1);
+        NumChildLocksInc(transaction, parent.parent);
+    }
+
+    private void NumChildLocksDec(TransactionContext transaction, LockContext parent) {
+        if (parent == null) {
+            return;
+        }
+        int NumParentLocks = parent.numChildLocks.getOrDefault(transaction.getTransNum(), 0);
+        if (NumParentLocks == 0) {
+            return;
+        }
+        parent.numChildLocks.put(transaction.getTransNum(), NumParentLocks - 1);
+        NumChildLocksDec(transaction, parent.parent);
     }
 
     public LockContext(LockManager lockman, LockContext parent, String name) {
@@ -126,14 +160,11 @@ public class LockContext {
         // TODO(proj4_part2): implement
         handleUnsupportedOperation();
         handleSIXAncestor(transaction, lockType);
-        handleDuplicateLockRequest(transaction, lockType);
-        handleInvalidLock(transaction,lockType);
+        handleDuplicateLockRequest(transaction);
+        handleInvalidLock(transaction, lockType,1);
 
         this.lockman.acquire(transaction, name, lockType);
-        if (parentContext() != null) {
-            parentContext().numChildLocks.putIfAbsent(transaction.getTransNum(), 0);
-            parentContext().numChildLocks.put(transaction.getTransNum(), parentContext().getNumChildren(transaction) + 1);
-        }
+        NumChildLocksInc(transaction, parent);
         return;
     }
 
@@ -153,7 +184,10 @@ public class LockContext {
             throws NoLockHeldException, InvalidLockException {
         // TODO(proj4_part2): implement
         handleUnsupportedOperation();
-
+        handleNoLockHeld(transaction);
+        handleInvalidLock(transaction,LockType.NL,2); //LockType.NL is meaningless
+        lockman.release(transaction, name);
+        NumChildLocksDec(transaction, parent);
         return;
     }
 
@@ -230,7 +264,7 @@ public class LockContext {
     public LockType getExplicitLockType(TransactionContext transaction) {
         if (transaction == null) return LockType.NL;
         // TODO(proj4_part2): implement
-        return LockType.NL;
+        return lockman.getLockType(transaction, name);
     }
 
     /**
