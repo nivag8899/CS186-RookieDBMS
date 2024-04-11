@@ -288,9 +288,51 @@ public class LockContext {
     public void escalate(TransactionContext transaction) throws NoLockHeldException {
         // TODO(proj4_part2): implement
         handleUnsupportedOperation();
-
+        handleNoLockHeld(transaction);
+        LockType lockType = lockman.getLockType(transaction, name);
+        List<ResourceName> descendants = getDescendants(transaction);
+        if (descendants.isEmpty() && (lockType.equals(LockType.S) || lockType.equals(LockType.X))) {
+            return;
+        }
+        //update numChildLocks
+        if (!descendants.isEmpty()) {
+            for (ResourceName resourceNameIterator: descendants) {
+                LockContext currLock = LockContext.fromResourceName(lockman, resourceNameIterator);
+                NumChildLocksDec(transaction,currLock.parent);
+            }
+        }
+        boolean isToLockTypeX = (lockType == LockType.IX
+                || lockType == LockType.SIX
+                || lockType == LockType.X);
+        if (!isToLockTypeX) {
+            for (ResourceName resourceNameIterator : descendants) {
+                LockType currLock = lockman.getLockType(transaction, resourceNameIterator);
+                if (currLock != LockType.S && currLock != LockType.IS) {
+                    isToLockTypeX = true;
+                    break;
+                }
+            }
+        }
+        descendants.add(name);
+        if (isToLockTypeX) {
+            lockman.acquireAndRelease(transaction, name, LockType.X, descendants);
+        } else {
+            lockman.acquireAndRelease(transaction, name, LockType.S, descendants);
+        }
         return;
     }
+
+    private List<ResourceName> getDescendants(TransactionContext transaction) {
+        List<ResourceName> names = new ArrayList<>();
+        List<Lock> locks = lockman.getLocks(transaction);
+        for (Lock lockIterator : locks) {
+            if (lockIterator.name.isDescendantOf(name)) {
+                names.add(lockIterator.name);
+            }
+        }
+        return names;
+    }
+
 
     /**
      * Get the type of lock that `transaction` holds at this level, or NL if no
