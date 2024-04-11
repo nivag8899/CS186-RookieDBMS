@@ -391,6 +391,14 @@ public class TestLockContext {
 
     @Test
     @Category(PublicTests.class)
+    public void testEffectiveLockType() {
+        TransactionContext t1 = transactions[1];
+        dbLockContext.acquire(t1,LockType.X);
+        assertEquals(LockType.X, dbLockContext.getExplicitLockType(t1));
+        assertEquals(LockType.X, tableLockContext.getExplicitLockType(t1));
+    }
+    @Test
+    @Category(PublicTests.class)
     public void testReadonly() {
         dbLockContext.disableChildLocks();
         LockContext tableContext = dbLockContext.childContext("table2");
