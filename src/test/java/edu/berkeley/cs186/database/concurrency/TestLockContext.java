@@ -117,6 +117,12 @@ public class TestLockContext {
         } catch (InvalidLockException e) {
             // do nothing
         }
+        try {
+            dbLockContext.promote(transactions[0],LockType.NL);
+            fail();
+        }catch (InvalidLockException e){
+            // do nothing
+        }
     }
 
     @Test

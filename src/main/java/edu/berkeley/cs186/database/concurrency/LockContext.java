@@ -172,6 +172,7 @@ public class LockContext {
     public void acquire(TransactionContext transaction, LockType lockType)
             throws InvalidLockException, DuplicateLockRequestException {
         // TODO(proj4_part2): implement
+        handleNoop(transaction,lockType);
         handleUnsupportedOperation();
         handleSIXAncestor(transaction, lockType);
         handleDuplicateLockRequest(transaction, LockType.NL, 1);
@@ -197,6 +198,9 @@ public class LockContext {
     public void release(TransactionContext transaction)
             throws NoLockHeldException, InvalidLockException {
         // TODO(proj4_part2): implement
+        if(transaction == null){
+            throw new InvalidLockException("Noop");
+        }
         handleUnsupportedOperation();
         handleNoLockHeld(transaction);
         handleInvalidLock(transaction, LockType.NL, 2); //LockType.NL is meaningless
@@ -229,6 +233,7 @@ public class LockContext {
         // TODO(proj4_part2): implement
         handleUnsupportedOperation();
         handleNoLockHeld(transaction);
+        handleNoop(transaction,newLockType);
         handleDuplicateLockRequest(transaction, newLockType, 2);
 
         LockType lockType = lockman.getLockType(transaction, name);
