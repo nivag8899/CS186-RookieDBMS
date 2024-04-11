@@ -53,10 +53,17 @@ public class LockContext {
         }
     }
 
-    private void handleDuplicateLockRequest(TransactionContext transaction) {
-        if (lockman.getLockType(transaction, name) != LockType.NL) {
-            throw new DuplicateLockRequestException("Duplicate Lock");
+    private void handleDuplicateLockRequest(TransactionContext transaction,LockType newLockType, int duplicateLockType) {
+        if(duplicateLockType == 1){ //acquire
+            if (lockman.getLockType(transaction, name) != LockType.NL) {
+                throw new DuplicateLockRequestException("Duplicate Lock");
+            }
+        } else if (duplicateLockType == 2) { //promote
+            if (lockman.getLockType(transaction, name).equals(newLockType)) {
+                throw new DuplicateLockRequestException("TX has existed the new lock.");
+            }
         }
+
     }
 
     private void handleInvalidLock(TransactionContext transaction, LockType lockType,int invalidType) {
@@ -67,7 +74,7 @@ public class LockContext {
                     throw new InvalidLockException("Invalid Lock Request");
                 }
             }
-        } else if (invalidType == 2) {
+        } else if (invalidType == 2) { //release
             if (!numChildLocks.getOrDefault(transaction.getTransNum(), 0).equals(0)) {
                 throw new InvalidLockException("The lock cannot be released.");
             }
@@ -160,7 +167,7 @@ public class LockContext {
         // TODO(proj4_part2): implement
         handleUnsupportedOperation();
         handleSIXAncestor(transaction, lockType);
-        handleDuplicateLockRequest(transaction);
+        handleDuplicateLockRequest(transaction,LockType.NL,1);
         handleInvalidLock(transaction, lockType,1);
 
         this.lockman.acquire(transaction, name, lockType);
@@ -214,6 +221,29 @@ public class LockContext {
             throws DuplicateLockRequestException, NoLockHeldException, InvalidLockException {
         // TODO(proj4_part2): implement
         handleUnsupportedOperation();
+        handleNoLockHeld(transaction);
+        handleDuplicateLockRequest(transaction,newLockType,2);
+        LockType lockType = lockman.getLockType(transaction, name);
+        if (!newLockType.equals(LockType.SIX)) {
+            if (LockType.substitutable(newLockType, lockType)) { lockman.promote(transaction, name, newLockType);  }
+            else { throw new InvalidLockException("Invalid promotion."); }
+        }
+        else {
+            if (!LockType.substitutable(newLockType, lockType) || hasSIXAncestor(transaction)) {
+                throw new InvalidLockException("Invalid promotion."); }
+            else {
+                List<ResourceName> sisDescendants = sisDescendants(transaction);
+                List<LockContext> contexts = new ArrayList<>();
+                sisDescendants.add(this.getResourceName());
+                for (ResourceName resourceName : sisDescendants) {
+                    contexts.add(fromResourceName(lockman, resourceName));
+                }
+                lockman.acquireAndRelease(transaction, name, newLockType, sisDescendants);
+                for (LockContext context : contexts) {
+                    context.NumChildLocksDec(transaction, context.parent);
+                }
+            }
+        }
         return;
     }
 
