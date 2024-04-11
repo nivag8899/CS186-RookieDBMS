@@ -240,6 +240,26 @@ public class TestLockContext {
         assertTrue(TestLockManager.holds(lockManager, t1, dbLockContext.getResourceName(), LockType.X));
     }
 
+//if a transaction holds IX(database), IS(table), S(page)
+// and promotes the database lock to a SIX lock via LockContext#promote,
+// numChildLocks should be updated to be 0 for both the database and table contexts.
+    @Test
+    public void testPromoteSIXSaturation() {
+        // your test code here
+        TransactionContext t1 = transactions[1];
+        dbLockContext.acquire(t1,LockType.IX);
+        tableLockContext.acquire(t1,LockType.IS);
+        pageLockContext.acquire(t1,LockType.S);
+        try{
+            dbLockContext.promote(t1,LockType.SIX);
+            fail();
+        }catch (InvalidLockException e){
+            assertEquals(0, dbLockContext.getNumChildren(t1));
+            assertEquals(0,tableLockContext.getNumChildren(t1));
+        }
+
+    }
+
     @Test
     @Category(PublicTests.class)
     public void testEscalateFail() {
