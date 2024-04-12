@@ -6,7 +6,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 
 public class LockUtil {
-
     public static void ensureSufficientLockHeld(LockContext lockContext, LockType lockType) {
         TransactionContext transaction = TransactionContext.getTransaction();
         if (transaction == null || lockType.equals(LockType.NL)) {
