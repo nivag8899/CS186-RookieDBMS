@@ -263,6 +263,16 @@ public class TestLockContext {
     }
 
     @Test
+    public void testPromoteAncestorToSIX() {
+        // your test code here
+        TransactionContext t1 = transactions[1];
+        dbLockContext.acquire(t1,LockType.IX);
+        tableLockContext.acquire(t1,LockType.SIX);
+        dbLockContext.promote(t1,LockType.SIX);
+        assertEquals(1, dbLockContext.getNumChildren(t1));
+    }
+
+    @Test
     @Category(PublicTests.class)
     public void testEscalateFail() {
         TransactionContext t1 = transactions[1];
