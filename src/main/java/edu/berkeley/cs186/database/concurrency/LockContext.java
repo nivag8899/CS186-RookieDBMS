@@ -246,7 +246,7 @@ public class LockContext {
                 throw new InvalidLockException("1");
             }
         } else { //newLockType == SIX
-            if (!LockType.substitutable(newLockType, lockType) && !lockType.isIntent()) {
+            if (hasSIXAncestor(transaction) || !LockType.substitutable(newLockType, lockType) && !lockType.isIntent()) {
                 throw new InvalidLockException("2");
             } else {
                 List<ResourceName> sisDescendantsList = sisDescendants(transaction);
