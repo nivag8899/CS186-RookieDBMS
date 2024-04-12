@@ -524,7 +524,59 @@ public class TestLockContext {
         assertEquals(0, pageLockContext.getNumChildren(t1));
     }
 
+    @Test
+    @Category(PublicTests.class)
+    public void testComplexPromotionPath() {
+        TransactionContext t1 = transactions[1];
+        dbLockContext.acquire(t1, LockType.S);
+        dbLockContext.promote(t1, LockType.SIX);
+        assertTrue(TestLockManager.holds(lockManager, t1, dbLockContext.getResourceName(), LockType.SIX));
+        try{
+            dbLockContext.promote(t1, LockType.X);
+            fail();
+        } catch (InvalidLockException e){
+            //do nothing
+        }
+    }
 
+    @Test
+    @Category(PublicTests.class)
+    public void testReacquireAfterRelease() {
+        TransactionContext t1 = transactions[1];
+        dbLockContext.acquire(t1, LockType.IS);
+        dbLockContext.release(t1);
+        assertFalse(TestLockManager.holds(lockManager, t1, dbLockContext.getResourceName(), LockType.IS));
+        dbLockContext.acquire(t1, LockType.IX);
+        assertTrue(TestLockManager.holds(lockManager, t1, dbLockContext.getResourceName(), LockType.IX));
+    }
 
+    @Test
+    @Category(PublicTests.class)
+    public void testParentPromotionWithoutChildren() {
+        TransactionContext t1 = transactions[1];
+        dbLockContext.acquire(t1, LockType.IS);
+        dbLockContext.promote(t1, LockType.IX);
+        assertTrue(TestLockManager.holds(lockManager, t1, dbLockContext.getResourceName(), LockType.IX));
+    }
 
+    @Test
+    @Category(PublicTests.class)
+    public void testHierarchicalLockUpgrade() {
+        TransactionContext t1 = transactions[1];
+        dbLockContext.acquire(t1, LockType.IX);
+        tableLockContext.acquire(t1, LockType.X);
+        assertTrue(TestLockManager.holds(lockManager, t1, tableLockContext.getResourceName(), LockType.X));
+    }
+
+    @Test
+    @Category(PublicTests.class)
+    public void testChildLockReleaseOnParentUpgrade() {
+        TransactionContext t1 = transactions[1];
+        dbLockContext.acquire(t1, LockType.IX);
+        tableLockContext.acquire(t1, LockType.IS);
+        pageLockContext.acquire(t1, LockType.S);
+        dbLockContext.promote(t1, LockType.SIX);
+        // 在SIX升级后，子锁应该被释放
+        assertFalse(TestLockManager.holds(lockManager, t1, pageLockContext.getResourceName(), LockType.S));
+    }
 }
