@@ -235,7 +235,9 @@ public class LockContext {
         handleNoLockHeld(transaction);
         handleNoop(transaction,newLockType);
         handleDuplicateLockRequest(transaction, newLockType, 2);
-
+        if (parent != null && !LockType.canBeParentLock(parent.getEffectiveLockType(transaction), newLockType)) {
+            throw new InvalidLockException("the lock request is invalid");
+        }
         LockType lockType = lockman.getLockType(transaction, name);
         if (!newLockType.equals(LockType.SIX)) {
             if (LockType.substitutable(newLockType, lockType)) {

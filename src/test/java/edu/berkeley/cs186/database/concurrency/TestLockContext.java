@@ -457,5 +457,64 @@ public class TestLockContext {
         dbLockContext.escalate(t1);
         assertEquals(0, dbLockContext.getNumChildren(t1));
     }
+    @Test
+    @Category(PublicTests.class)
+    public void testUniqueness() {
+        ResourceName database = new ResourceName("database");
+        ResourceName table1 = new ResourceName(database, "table1");
+        ResourceName page1 = new ResourceName(table1, "page1");
+        LockContext samePageLockContext = LockContext.fromResourceName(lockManager, page1);
+        assertEquals(pageLockContext, samePageLockContext);
+    }
+
+
+
+    @Test
+    @Category(PublicTests.class)
+    public void testSimplePromoteFail() {
+        TransactionContext t1 = transactions[1];
+        dbLockContext.acquire(t1, LockType.IS);
+        tableLockContext.acquire(t1, LockType.S);
+        try {
+            tableLockContext.promote(t1, LockType.X);
+            fail();
+        } catch (InvalidLockException e) {
+            // do nothing
+        }
+    }
+
+    @Test
+    @Category(PublicTests.class)
+    public void testSIXParentFail() {
+        TransactionContext t1 = transactions[1];
+        dbLockContext.acquire(t1, LockType.SIX);
+        tableLockContext.acquire(t1, LockType.IX);
+        try {
+            tableLockContext.promote(t1, LockType.SIX);
+            fail();
+        } catch (InvalidLockException e) {
+            // do nothing
+        }
+    }
+
+    @Test
+    @Category(PublicTests.class)
+    public void testReleaseSIS() {
+        TransactionContext t1 = transactions[1];
+        dbLockContext.acquire(t1, LockType.IS);
+        assertEquals(0, dbLockContext.getNumChildren(t1));
+        tableLockContext.acquire(t1, LockType.IS);
+        assertEquals(1, dbLockContext.getNumChildren(t1));
+        pageLockContext.acquire(t1, LockType.S);
+        assertEquals(2, dbLockContext.getNumChildren(t1));
+
+        dbLockContext.promote(t1, LockType.SIX);
+        assertEquals(0, dbLockContext.getNumChildren(t1));
+        assertEquals(0, tableLockContext.getNumChildren(t1));
+        assertEquals(0, pageLockContext.getNumChildren(t1));
+    }
+
+
+
 
 }
