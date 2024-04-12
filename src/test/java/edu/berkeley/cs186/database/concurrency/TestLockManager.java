@@ -30,7 +30,7 @@ public class TestLockManager {
     // 2 seconds per test
     @Rule
     public TestRule globalTimeout = new DisableOnDebug(Timeout.millis((long) (
-                2000 * TimeoutScaling.factor)));
+            2000 * TimeoutScaling.factor)));
 
     /**
      * Given a LockManager lockman, checks if transaction holds a Lock specified
@@ -246,11 +246,11 @@ public class TestLockManager {
          */
         DeterministicRunner runner = new DeterministicRunner(2);
         runner.run(0, () -> lockman.acquireAndRelease(transactions[0], tables[0], LockType.X,
-                   Collections.emptyList()));
+                Collections.emptyList()));
         runner.run(1, () -> lockman.acquireAndRelease(transactions[1], tables[1], LockType.X,
-                   Collections.emptyList()));
+                Collections.emptyList()));
         runner.run(0, () -> lockman.acquireAndRelease(transactions[0], tables[1], LockType.X,
-                   Collections.singletonList(tables[0])));
+                Collections.singletonList(tables[0])));
 
         // Transaction 0 should have an X lock on table0
         assertEquals(LockType.X, lockman.getLockType(transactions[0], tables[0]));
@@ -278,13 +278,13 @@ public class TestLockManager {
         // Transaction 0 acquires an X lock on table0
         DeterministicRunner runner = new DeterministicRunner(1);
         runner.run(0, () -> lockman.acquireAndRelease(transactions[0], tables[0], LockType.X,
-                   Collections.emptyList()));
+                Collections.emptyList()));
         try {
             // Transaction 0 attempts to acquire another X lock on table0
             runner.run(0, () -> lockman.acquireAndRelease(transactions[0], tables[0], LockType.X,
-                       Collections.emptyList()));
+                    Collections.emptyList()));
             fail("Attempting to acquire a duplicate lock should throw a " +
-                 "DuplicateLockRequestException.");
+                    "DuplicateLockRequestException.");
         } catch (DuplicateLockRequestException e) {
             // do nothing
         }
@@ -298,16 +298,16 @@ public class TestLockManager {
         // Transaction 0 acquires an X lock on table0
         DeterministicRunner runner = new DeterministicRunner(1);
         runner.run(0, () -> lockman.acquireAndRelease(transactions[0], tables[0], LockType.X,
-                   Collections.emptyList()));
+                Collections.emptyList()));
         try {
             // Transaction 0 attempts to acquire an X lock on table2,
             // and release locks on table0 and table1.
             runner.run(0, () -> lockman.acquireAndRelease(
-                transactions[0], tables[2],
-                LockType.X, Arrays.asList(tables[0], tables[1]))
+                    transactions[0], tables[2],
+                    LockType.X, Arrays.asList(tables[0], tables[1]))
             );
             fail("Attempting to release a lock that is not held should throw " +
-                 "a NoLockHeldException.");
+                    "a NoLockHeldException.");
         } catch (NoLockHeldException e) {
             // do nothing
         }
@@ -326,7 +326,7 @@ public class TestLockManager {
         runner.run(0, () -> {
             lockman.acquireAndRelease(transactions[0], tables[0], LockType.S, Collections.emptyList());
             lockman.acquireAndRelease(transactions[0], tables[0], LockType.X,
-                                      Collections.singletonList(tables[0]));
+                    Collections.singletonList(tables[0]));
         });
 
         // Transaction 0 should have an X lock on table0
@@ -366,7 +366,7 @@ public class TestLockManager {
 
         // Lock check
         assertEquals(Collections.singletonList(new Lock(dbResource, LockType.S, 0L)),
-                     lockman.getLocks(dbResource));
+                lockman.getLocks(dbResource));
 
         // Block checks
         List<Boolean> blocked_status = new ArrayList<>();
@@ -389,7 +389,7 @@ public class TestLockManager {
 
         // Lock check
         assertEquals(Collections.singletonList(new Lock(dbResource, LockType.X, 1L)),
-                     lockman.getLocks(dbResource));
+                lockman.getLocks(dbResource));
 
         // Block checks
         blocked_status.clear();
@@ -408,7 +408,7 @@ public class TestLockManager {
 
         // Lock check
         assertEquals(Collections.singletonList(new Lock(dbResource, LockType.S, 2L)),
-                     lockman.getLocks(dbResource));
+                lockman.getLocks(dbResource));
 
         // Block checks
         blocked_status.clear();
@@ -443,7 +443,7 @@ public class TestLockManager {
 
         // Lock check
         assertEquals(Collections.singletonList(new Lock(dbResource, LockType.X, 0L)),
-                     lockman.getLocks(dbResource));
+                lockman.getLocks(dbResource));
 
         // Block checks
         List<Boolean> blocked_status = new ArrayList<>();
@@ -467,7 +467,7 @@ public class TestLockManager {
 
         // Lock check
         assertEquals(Collections.singletonList(new Lock(dbResource, LockType.S, 1L)),
-                     lockman.getLocks(dbResource));
+                lockman.getLocks(dbResource));
 
         // Block checks
         blocked_status.clear();
@@ -489,7 +489,7 @@ public class TestLockManager {
 
         // Lock check
         assertEquals(Collections.singletonList(new Lock(dbResource, LockType.X, 2L)),
-                     lockman.getLocks(dbResource));
+                lockman.getLocks(dbResource));
 
         // Block checks
         blocked_status.clear();
@@ -509,7 +509,7 @@ public class TestLockManager {
 
         // Lock check
         assertEquals(Collections.singletonList(new Lock(dbResource, LockType.S, 3L)),
-                     lockman.getLocks(dbResource));
+                lockman.getLocks(dbResource));
 
         // Block checks
         blocked_status.clear();
@@ -757,4 +757,3 @@ public class TestLockManager {
     }
 
 }
-
