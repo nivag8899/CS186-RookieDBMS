@@ -169,13 +169,23 @@ public class ARIESRecoveryManager implements RecoveryManager {
      * @param LSN      LSN to which we should rollback
      */
     private void rollbackToLSN(long transNum, long LSN) {
-        TransactionTableEntry transactionEntry = transactionTable.get(transNum);
-        LogRecord lastRecord = logManager.fetchLogRecord(transactionEntry.lastLSN);
+        TransactionTableEntry transactionTableEntry = transactionTable.get(transNum);
+        LogRecord lastRecord = logManager.fetchLogRecord(transactionTableEntry.lastLSN);
         long lastRecordLSN = lastRecord.getLSN();
         // Small optimization: if the last record is a CLR we can start rolling
         // back from the next record that hasn't yet been undone.
         long currentLSN = lastRecord.getUndoNextLSN().orElse(lastRecordLSN);
         // TODO(proj5) implement the rollback logic described above
+        while (currentLSN > LSN) {
+            LogRecord logRecord = logManager.fetchLogRecord(currentLSN);
+            if (logRecord.isUndoable()) {
+                LogRecord CLR = logRecord.undo(transactionTableEntry.lastLSN);
+                long LSNofCLR = logManager.appendToLog(CLR);
+                transactionTableEntry.lastLSN = LSNofCLR;
+                CLR.redo(this, diskSpaceManager, bufferManager);
+            }
+            currentLSN = logRecord.getPrevLSN().orElse(-1L);
+        }
     }
 
     /**
