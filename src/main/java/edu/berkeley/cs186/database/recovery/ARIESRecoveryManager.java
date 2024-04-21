@@ -170,21 +170,23 @@ public class ARIESRecoveryManager implements RecoveryManager {
      */
     private void rollbackToLSN(long transNum, long LSN) {
         TransactionTableEntry transactionTableEntry = transactionTable.get(transNum);
-        LogRecord lastRecord = logManager.fetchLogRecord(transactionTableEntry.lastLSN);
-        long lastRecordLSN = lastRecord.getLSN();
-        // Small optimization: if the last record is a CLR we can start rolling
-        // back from the next record that hasn't yet been undone.
-        long currentLSN = lastRecord.getUndoNextLSN().orElse(lastRecordLSN);
         // TODO(proj5) implement the rollback logic described above
-        while (currentLSN > LSN) {
-            LogRecord logRecord = logManager.fetchLogRecord(currentLSN);
-            if (logRecord.isUndoable()) {
-                LogRecord CLR = logRecord.undo(transactionTableEntry.lastLSN);
-                long LSNofCLR = logManager.appendToLog(CLR);
-                transactionTableEntry.lastLSN = LSNofCLR;
-                CLR.redo(this, diskSpaceManager, bufferManager);
+        long nextLSN = LSN;
+        LogRecord r = logManager.fetchLogRecord(LSN);
+        while (!r.getPrevLSN().equals(Optional.empty())) {
+            if (r.isUndoable()) {
+                LogRecord undoRecord = r.undo(nextLSN);
+                nextLSN = logManager.appendToLog(undoRecord);
+                transactionTableEntry.lastLSN = nextLSN;
+
+                if (!(undoRecord instanceof UndoAllocPartLogRecord) && !(undoRecord instanceof UndoFreePartLogRecord)) {
+                    if (!dirtyPageTable.containsKey(undoRecord.getPageNum().get())) {
+                        dirtyPageTable.put(undoRecord.getPageNum().get(), nextLSN);
+                    }
+                }
+                undoRecord.redo(this, diskSpaceManager, bufferManager);
             }
-            currentLSN = logRecord.getPrevLSN().orElse(-1L);
+            r = logManager.fetchLogRecord(r.getPrevLSN().get());
         }
     }
 
@@ -236,7 +238,25 @@ public class ARIESRecoveryManager implements RecoveryManager {
         assert (before.length == after.length);
         assert (before.length <= BufferManager.EFFECTIVE_PAGE_SIZE / 2);
         // TODO(proj5): implement
-        return -1L;
+        TransactionTableEntry transactionTableEntry = this.transactionTable.get(transNum);
+        long LSN = transactionTableEntry.lastLSN;
+        int pageSize = before.length;
+        if (pageSize <= BufferManager.EFFECTIVE_PAGE_SIZE / 2) {
+            long firstLSN = logManager.appendToLog(new UpdatePageLogRecord(transNum, pageNum, LSN, pageOffset, before, after));
+            if (!dirtyPageTable.containsKey(pageNum)) {
+                dirtyPageTable.put(pageNum, firstLSN);
+            }
+            transactionTableEntry.lastLSN = firstLSN;
+            return firstLSN;
+        } else {
+            long firstLSN = logManager.appendToLog(new UpdatePageLogRecord(transNum, pageNum, LSN, pageOffset, before, new byte[0]));
+            long secondLSN = logManager.appendToLog(new UpdatePageLogRecord(transNum, pageNum, firstLSN, pageOffset, new byte[0], after));
+            if (!dirtyPageTable.containsKey(pageNum)) {
+                dirtyPageTable.put(pageNum, firstLSN);
+            }
+            transactionTableEntry.lastLSN = secondLSN;
+            return secondLSN;
+        }
     }
 
     /**
