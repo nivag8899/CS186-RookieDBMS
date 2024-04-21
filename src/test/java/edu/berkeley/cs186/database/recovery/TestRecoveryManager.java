@@ -194,8 +194,8 @@ public class TestRecoveryManager {
         expectedUpdateCLR.setLSN(70000L);
 
         setupRedoChecks(
-            record -> assertEquals(expectedAllocCLR, record),
-            record -> assertEquals(expectedUpdateCLR, record)
+                record -> assertEquals(expectedAllocCLR, record),
+                record -> assertEquals(expectedUpdateCLR, record)
         );
         recoveryManager.end(t1.getTransNum());
         finishRedoChecks();
@@ -666,7 +666,7 @@ public class TestRecoveryManager {
      * 2. Simulates database shutdown
      * 3. Runs analysis phase of recovery
      * 4. Checks for correct transaction table and DPT (see comments below for tables)
-     * 5. Checks transaction statuses/cleanup
+     * 5. Checks transaction statuses/cleanup statuses
      */
     @Test
     @Category(PublicTests.class)
@@ -747,7 +747,7 @@ public class TestRecoveryManager {
         assertEquals(Transaction.Status.RECOVERY_ABORTING, transaction2.getStatus());
         assertFalse(transaction2.cleanedUp);
         assertEquals(Transaction.Status.RECOVERY_ABORTING, transaction3.getStatus());
-        assertFalse(transaction3.cleanedUp);
+        assertFalse(transaction2.cleanedUp);
 
         // FlushedLSN
         assertEquals(LogManager.maxLSN(LogManager.getLSNPage(LSNs.get(7))), logManager.getFlushedLSN());
@@ -790,19 +790,19 @@ public class TestRecoveryManager {
         LSNs.add(logManager.appendToLog(new CommitTransactionLogRecord(2L, LSNs.get(6)))); // 8
         LSNs.add(logManager.appendToLog(new AbortTransactionLogRecord(3L, 0L))); // 9
         LSNs.add(logManager.appendToLog(new EndCheckpointLogRecord(
-            new HashMap<Long, Long>() {{
-                // End checkpoint DPT
-                put(10000000001L, LSNs.get(0));
-                put(10000000002L, LSNs.get(1));
-                put(10000000003L, LSNs.get(5));
-                put(10000000004L, LSNs.get(6));
-            }},
-            new HashMap<Long, Pair<Transaction.Status, Long>>() {{
-                // End checkpoint Transaction Table
-                put(2L, new Pair<>(Transaction.Status.COMMITTING, LSNs.get(8)));
-                put(3L, new Pair<>(Transaction.Status.ABORTING, LSNs.get(9)));
-                put(4L, new Pair<>(Transaction.Status.RUNNING, 0L));
-            }}
+                new HashMap<Long, Long>() {{
+                    // End checkpoint DPT
+                    put(10000000001L, LSNs.get(0));
+                    put(10000000002L, LSNs.get(1));
+                    put(10000000003L, LSNs.get(5));
+                    put(10000000004L, LSNs.get(6));
+                }},
+                new HashMap<Long, Pair<Transaction.Status, Long>>() {{
+                    // End checkpoint Transaction Table
+                    put(2L, new Pair<>(Transaction.Status.COMMITTING, LSNs.get(8)));
+                    put(3L, new Pair<>(Transaction.Status.ABORTING, LSNs.get(9)));
+                    put(4L, new Pair<>(Transaction.Status.RUNNING, 0L));
+                }}
         ))); // 10
         // end/abort records from analysis=
         logManager.rewriteMasterRecord(new MasterLogRecord(LSNs.get(2)));
@@ -868,15 +868,15 @@ public class TestRecoveryManager {
         LSNs.add(logManager.appendToLog(new CommitTransactionLogRecord(5L, 0L))); // 7
         LSNs.add(logManager.appendToLog(new AbortTransactionLogRecord(6L, 0L))); // 8
         LSNs.add(logManager.appendToLog(new EndCheckpointLogRecord(
-            new HashMap<>(), // empty DPT
-            new HashMap<Long, Pair<Transaction.Status, Long>>() {{
-                put(1L, new Pair<>(Transaction.Status.COMMITTING, LSNs.get(0)));
-                put(2L, new Pair<>(Transaction.Status.COMMITTING, LSNs.get(1)));
-                put(3L, new Pair<>(Transaction.Status.ABORTING, LSNs.get(2)));
-                put(4L, new Pair<>(Transaction.Status.ABORTING, LSNs.get(3)));
-                put(5L, new Pair<>(Transaction.Status.RUNNING, 0L));
-                put(6L, new Pair<>(Transaction.Status.RUNNING, 0L));
-            }}
+                new HashMap<>(), // empty DPT
+                new HashMap<Long, Pair<Transaction.Status, Long>>() {{
+                    put(1L, new Pair<>(Transaction.Status.COMMITTING, LSNs.get(0)));
+                    put(2L, new Pair<>(Transaction.Status.COMMITTING, LSNs.get(1)));
+                    put(3L, new Pair<>(Transaction.Status.ABORTING, LSNs.get(2)));
+                    put(4L, new Pair<>(Transaction.Status.ABORTING, LSNs.get(3)));
+                    put(5L, new Pair<>(Transaction.Status.RUNNING, 0L));
+                    put(6L, new Pair<>(Transaction.Status.RUNNING, 0L));
+                }}
         ))); // 9
 
         logManager.rewriteMasterRecord(new MasterLogRecord(LSNs.get(5)));
@@ -968,9 +968,9 @@ public class TestRecoveryManager {
         // LogRecord#redo call. Note that the first two updates should not be
         // redone based on the state of the DPT.
         setupRedoChecks(
-            record -> assertEquals(LSNs.get(2), record.LSN),
-            record -> assertEquals(LSNs.get(3), record.LSN),
-            record -> assertEquals(LSNs.get(4), record.LSN)
+                record -> assertEquals(LSNs.get(2), record.LSN),
+                record -> assertEquals(LSNs.get(3), record.LSN),
+                record -> assertEquals(LSNs.get(4), record.LSN)
         );
         recoveryManager.restartRedo();
         finishRedoChecks();
@@ -1511,3 +1511,4 @@ public class TestRecoveryManager {
         DummyTransaction.cleanupTransactions();
     }
 }
+
