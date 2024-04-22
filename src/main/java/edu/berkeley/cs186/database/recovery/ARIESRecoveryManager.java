@@ -140,15 +140,18 @@ public class ARIESRecoveryManager implements RecoveryManager {
     @Override
     public long end(long transNum) {
         // TODO(proj5): implement
-        TransactionTableEntry transactionTableEntry = this.transactionTable.get(transNum);
-        if (transactionTableEntry.transaction.getStatus().equals(Transaction.Status.ABORTING)) {
-            rollbackToLSN(transNum, transactionTableEntry.lastLSN);
+        if (this.transactionTable.get(transNum).transaction.getStatus().equals(Transaction.Status.ABORTING)) {
+            LogRecord record = this.logManager.fetchLogRecord(this.transactionTable.get(transNum).lastLSN);
+            while (record.getPrevLSN().isPresent()) {
+                record = this.logManager.fetchLogRecord(record.getPrevLSN().get());
+            }
+            rollbackToLSN(transNum, record.LSN);
         }
-        long newLSN = logManager.appendToLog(new EndTransactionLogRecord(transNum, transactionTableEntry.lastLSN));
-        transactionTableEntry.transaction.setStatus(Transaction.Status.COMPLETE);
-        transactionTableEntry.lastLSN = newLSN;
-        transactionTable.remove(transNum);
-        return newLSN;
+        this.logManager.appendToLog(new EndTransactionLogRecord(transNum,
+                this.transactionTable.get(transNum).lastLSN));
+        this.transactionTable.get(transNum).transaction.setStatus(Transaction.Status.COMPLETE);
+        this.transactionTable.remove(transNum);
+        return -1L;
     }
 
     /**
@@ -169,24 +172,23 @@ public class ARIESRecoveryManager implements RecoveryManager {
      * @param LSN      LSN to which we should rollback
      */
     private void rollbackToLSN(long transNum, long LSN) {
-        TransactionTableEntry transactionTableEntry = transactionTable.get(transNum);
+        TransactionTableEntry transactionEntry = transactionTable.get(transNum);
+        LogRecord lastRecord = logManager.fetchLogRecord(transactionEntry.lastLSN);
+        long lastRecordLSN = lastRecord.getLSN();
+        // Small optimization: if the last record is a CLR we can start rolling
+        // back from the next record that hasn't yet been undone.
+        long currentLSN = lastRecord.getUndoNextLSN().orElse(lastRecordLSN);
         // TODO(proj5) implement the rollback logic described above
-        long nextLSN = LSN;
-        LogRecord r = logManager.fetchLogRecord(LSN);
-        while (!r.getPrevLSN().equals(Optional.empty())) {
-            if (r.isUndoable()) {
-                LogRecord undoRecord = r.undo(nextLSN);
-                nextLSN = logManager.appendToLog(undoRecord);
-                transactionTableEntry.lastLSN = nextLSN;
 
-                if (!(undoRecord instanceof UndoAllocPartLogRecord) && !(undoRecord instanceof UndoFreePartLogRecord)) {
-                    if (!dirtyPageTable.containsKey(undoRecord.getPageNum().get())) {
-                        dirtyPageTable.put(undoRecord.getPageNum().get(), nextLSN);
-                    }
-                }
-                undoRecord.redo(this, diskSpaceManager, bufferManager);
+        while (currentLSN > LSN) {
+            LogRecord logRecord = logManager.fetchLogRecord(currentLSN);
+            if (logRecord.isUndoable()) {
+                LogRecord clr = logRecord.undo(transactionEntry.lastLSN);
+                long lsn = logManager.appendToLog(clr);
+                transactionEntry.lastLSN = lsn;
+                clr.redo(this, diskSpaceManager, bufferManager);
             }
-            r = logManager.fetchLogRecord(r.getPrevLSN().get());
+            currentLSN = logRecord.getPrevLSN().orElse(-1L);
         }
     }
 
@@ -804,24 +806,24 @@ public class ARIESRecoveryManager implements RecoveryManager {
             pq.add(new Pair<>(entry.getValue().lastLSN, entry.getKey()));
         }
 
-        while (pq.size() > 0) {
+        while (!pq.isEmpty()) {
             Pair<Long, Long> curPair = pq.poll();
             TransactionTableEntry tte = transactionTable.get(curPair.getSecond());
-            LogRecord currLR = logManager.fetchLogRecord(curPair.getFirst());
-            if (currLR.isUndoable()) {
-                if (currLR.getPageNum().isPresent()) {
-                    if (dirtyPageTable.containsKey(currLR.getPageNum().get())) {
-                        if (currLR.getLSN() == dirtyPageTable.get(currLR.getPageNum().get())) {
-                            dirtyPageTable.remove(currLR.getPageNum().get());
+            LogRecord currentLR = logManager.fetchLogRecord(curPair.getFirst());
+            if (currentLR.isUndoable()) {
+                if (currentLR.getPageNum().isPresent()) {
+                    if (dirtyPageTable.containsKey(currentLR.getPageNum().get())) {
+                        if (currentLR.getLSN() == dirtyPageTable.get(currentLR.getPageNum().get())) {
+                            dirtyPageTable.remove(currentLR.getPageNum().get());
                         }
                     }
                 }
-                LogRecord tmplr = currLR.undo(tte.lastLSN);
+                LogRecord tmplr = currentLR.undo(tte.lastLSN);
                 logManager.appendToLog(tmplr);
                 tte.lastLSN = tmplr.getLSN();
                 tmplr.redo(this, diskSpaceManager, bufferManager);
             }
-            Long newLSN = currLR.getUndoNextLSN().isPresent() ? currLR.getUndoNextLSN().get() : currLR.getPrevLSN().get();
+            Long newLSN = currentLR.getUndoNextLSN().isPresent() ? currentLR.getUndoNextLSN().get() : currentLR.getPrevLSN().get();
             if (newLSN == 0) {
                 tte.transaction.cleanup();
                 tte.transaction.setStatus(Transaction.Status.COMPLETE);
