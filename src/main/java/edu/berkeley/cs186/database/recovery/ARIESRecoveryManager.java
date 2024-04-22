@@ -681,16 +681,23 @@ public class ARIESRecoveryManager implements RecoveryManager {
         }
     }
 
+
     private void updateTransactionTableEntry(Long transNum, Pair<Transaction.Status, Long> pair) {
         TransactionTableEntry tableEntry = transactionTable.get(transNum);
         Long lsn = pair.getSecond();
         if (lsn >= tableEntry.lastLSN) {
             tableEntry.lastLSN = lsn;
         }
-        if (judgeAdvance(pair.getFirst(), tableEntry.transaction.getStatus())) {
-            tableEntry.transaction.setStatus(pair.getFirst());
+        Transaction.Status newStatus = pair.getFirst();
+        // Update the transaction status, ensuring correct state transitions for recovery
+        if (newStatus == Transaction.Status.ABORTING) {
+            // Adjust status for transactions listed as ABORTING in the checkpoint
+            tableEntry.transaction.setStatus(Transaction.Status.RECOVERY_ABORTING);
+        } else {
+            tableEntry.transaction.setStatus(newStatus);
         }
     }
+
 
     private void finalizeTransactions() {
         for (Long transNum : transactionTable.keySet()) {
