@@ -584,6 +584,15 @@ public class ARIESRecoveryManager implements RecoveryManager {
      * record
      * - if RECOVERY_ABORTING: no action needed
      */
+//
+    private boolean judgeAdvance(Transaction.Status type1, Transaction.Status type2) {
+        if (type1.equals(Transaction.Status.RUNNING)) return false;
+        if (type1.equals(Transaction.Status.ABORTING) || type1.equals(Transaction.Status.COMMITTING)) {
+            return type2.equals(Transaction.Status.RUNNING);
+        }
+        return true;
+    }
+
     void restartAnalysis() {
         // Read master record
         LogRecord record = logManager.fetchLogRecord(0L);
@@ -598,137 +607,107 @@ public class ARIESRecoveryManager implements RecoveryManager {
         Iterator<LogRecord> iterator = logManager.scanFrom(LSN);
         while (iterator.hasNext()) {
             LogRecord logRecord = iterator.next();
-            processTransaction(logRecord, endedTransactions);
-            processPageOperation(logRecord);
-            processEndCheckpoint(logRecord, endedTransactions);
-        }
-        finalizeTransactions();
-    }
+            // 如果这是一次事务操作
+            if (logRecord.getTransNum().isPresent()) {
+                Long transNum = logRecord.getTransNum().get();
+                // 如果是一个新事务，就将其添加到事务表里
+                if (transactionTable.get(transNum) == null) {
+                    Transaction transaction = newTransaction.apply(transNum);
+                    startTransaction(transaction);
+                }
+                // 更新事务的LSN
+                TransactionTableEntry tableEntry = transactionTable.get(transNum);
+                tableEntry.lastLSN = logRecord.getLSN();
+            }
+            // 如果是数据页操作
+            if (logRecord.getPageNum().isPresent()) {
+                LogType type = logRecord.getType();
+                // 对于更新涉及写入的更新操作，将该页加入脏页表中
+                if (type.equals(LogType.UPDATE_PAGE) || type.equals(LogType.UNDO_UPDATE_PAGE)) {
+                    dirtyPage(logRecord.getPageNum().get(), logRecord.getLSN());
+                }
+                // 对于内存管理，先将更改写入磁盘，再从脏页表中移除
+                if (type.equals(LogType.FREE_PAGE) || type.equals(LogType.UNDO_ALLOC_PAGE)) {
+                    pageFlushHook(logRecord.getLSN());
+                    dirtyPageTable.remove(logRecord.getPageNum().get());
+                }
+                // 其余操作不需要管理
+            }
 
-    private void processTransaction(LogRecord logRecord, Set<Long> endedTransactions) {
-        if (logRecord.getTransNum().isPresent()) {
-            Long transNum = logRecord.getTransNum().get();
-            handleTransactionEntry(transNum, logRecord);
-            updateTransactionStatus(logRecord, transNum, endedTransactions);
-        }
-    }
+            if (logRecord.getType().equals(LogType.COMMIT_TRANSACTION)) {
+                Long transNum = logRecord.getTransNum().get();
+                TransactionTableEntry tableEntry = transactionTable.get(transNum);
+                tableEntry.transaction.setStatus(Transaction.Status.COMMITTING);
+            }
 
-    private void handleTransactionEntry(Long transNum, LogRecord logRecord) {
-        if (transactionTable.get(transNum) == null) {
-            Transaction transaction = newTransaction.apply(transNum);
-            startTransaction(transaction);
-        }
-        transactionTable.get(transNum).lastLSN = logRecord.getLSN();
-    }
+            if (logRecord.getType().equals(LogType.ABORT_TRANSACTION)) {
+                Long transNum = logRecord.getTransNum().get();
+                TransactionTableEntry tableEntry = transactionTable.get(transNum);
+                tableEntry.transaction.setStatus(Transaction.Status.RECOVERY_ABORTING);
+            }
 
-    private void updateTransactionStatus(LogRecord logRecord, Long transNum, Set<Long> endedTransactions) {
-        switch (logRecord.getType()) {
-            case COMMIT_TRANSACTION:
-                transactionTable.get(transNum).transaction.setStatus(Transaction.Status.COMMITTING);
-                break;
-            case ABORT_TRANSACTION:
-                transactionTable.get(transNum).transaction.setStatus(Transaction.Status.RECOVERY_ABORTING);
-                break;
-            case END_TRANSACTION:
+            // 如果是结束事务的日志，则需要先清除事务，从事务表移除，添加到endedTransactions,最后修改状态
+            if (logRecord.getType().equals(LogType.END_TRANSACTION)) {
+                Long transNum = logRecord.getTransNum().get();
                 TransactionTableEntry tableEntry = transactionTable.get(transNum);
                 tableEntry.transaction.cleanup();
                 transactionTable.remove(transNum);
                 endedTransactions.add(transNum);
                 tableEntry.transaction.setStatus(Transaction.Status.COMPLETE);
-                break;
-            default:
-                break;
-        }
-    }
-
-    private void processPageOperation(LogRecord logRecord) {
-        if (logRecord.getPageNum().isPresent()) {
-            Long pageNum = logRecord.getPageNum().get();
-            switch (logRecord.getType()) {
-                case UPDATE_PAGE:
-                case UNDO_UPDATE_PAGE:
-                    dirtyPage(pageNum, logRecord.getLSN());
-                    break;
-                case FREE_PAGE:
-                case UNDO_ALLOC_PAGE:
-                    pageFlushHook(logRecord.getLSN());
-                    dirtyPageTable.remove(pageNum);
-                    break;
-                default:
-                    break;
             }
-        }
-    }
 
-    private void processEndCheckpoint(LogRecord logRecord, Set<Long> endedTransactions) {
-        if (logRecord.getType().equals(LogType.END_CHECKPOINT)) {
-            mergeCheckpointData(logRecord, endedTransactions);
-        }
-    }
-
-    private void mergeCheckpointData(LogRecord logRecord, Set<Long> endedTransactions) {
-        Map<Long, Long> dpt = logRecord.getDirtyPageTable();
-        dirtyPageTable.putAll(dpt);
-        Map<Long, Pair<Transaction.Status, Long>> tTable = logRecord.getTransactionTable();
-        for (Map.Entry<Long, Pair<Transaction.Status, Long>> entry : tTable.entrySet()) {
-            Long transNum = entry.getKey();
-            if (endedTransactions.contains(transNum)) continue;
-            if (!transactionTable.containsKey(transNum)) {
-                startTransaction(newTransaction.apply(transNum));
+            if (logRecord.getType().equals(LogType.END_CHECKPOINT)) {
+                // 对于检查点脏页表的数据，将其全部加入
+                Map<Long, Long> dpt = logRecord.getDirtyPageTable();
+                dirtyPageTable.putAll(dpt);
+                Map<Long, Pair<Transaction.Status, Long>> tTable = logRecord.getTransactionTable();
+                // 如果检查点的事务表中有事务不在恢复事务表中，就将其添加
+                // 更新事务表的LSN
+                for (Long transNum : tTable.keySet()) {
+                    if (endedTransactions.contains(transNum)) continue;
+                    if (!transactionTable.containsKey(transNum)) {
+                        startTransaction(newTransaction.apply(transNum));
+                    }
+                    Pair<Transaction.Status, Long> pair = tTable.get(transNum);
+                    TransactionTableEntry tableEntry = transactionTable.get(transNum);
+                    Long lsn = pair.getSecond();
+                    if (lsn >= tableEntry.lastLSN) {
+                        tableEntry.lastLSN = lsn;
+                    }
+                    // 如果存档点中的事务状态领先，则要进行修改
+                    if (judgeAdvance(pair.getFirst(), tableEntry.transaction.getStatus())) {
+                        // 如果是aborting则需要修改为recovery_abort
+                        if (pair.getFirst().equals(Transaction.Status.ABORTING)) {
+                            tableEntry.transaction.setStatus(Transaction.Status.RECOVERY_ABORTING);
+                        } else {
+                            tableEntry.transaction.setStatus(pair.getFirst());
+                        }
+                    }
+                }
             }
-            Pair<Transaction.Status, Long> pair = entry.getValue();
-            updateTransactionTableEntry(transNum, pair);
+
+
         }
-    }
-
-
-    private void updateTransactionTableEntry(Long transNum, Pair<Transaction.Status, Long> pair) {
-        TransactionTableEntry tableEntry = transactionTable.get(transNum);
-        Long lsn = pair.getSecond();
-        if (lsn >= tableEntry.lastLSN) {
-            tableEntry.lastLSN = lsn;
-        }
-        Transaction.Status newStatus = pair.getFirst();
-        // Update the transaction status, ensuring correct state transitions for recovery
-        if (newStatus == Transaction.Status.ABORTING) {
-            // Adjust status for transactions listed as ABORTING in the checkpoint
-            tableEntry.transaction.setStatus(Transaction.Status.RECOVERY_ABORTING);
-        } else {
-            tableEntry.transaction.setStatus(newStatus);
-        }
-    }
-
-
-    private void finalizeTransactions() {
         for (Long transNum : transactionTable.keySet()) {
-            finalizeTransaction(transNum);
-        }
-    }
-
-    private void finalizeTransaction(Long transNum) {
-        TransactionTableEntry tableEntry = transactionTable.get(transNum);
-        Transaction transaction = tableEntry.transaction;
-        switch (transaction.getStatus()) {
-            case COMMITTING:
+            TransactionTableEntry tableEntry = transactionTable.get(transNum);
+            Transaction transaction = tableEntry.transaction;
+            // 这里cleanup必须在end前调用，因为end会修改状态，导致cleanup报错
+            if (transaction.getStatus().equals(Transaction.Status.COMMITTING)) {
                 transaction.cleanup();
                 end(transNum);
-                break;
-            case RUNNING:
+            }
+            // 这里要注意以下顺序，abort()会将事务修改为abort状态，但我们这时候需要的是RECOVERY_ABORTING
+            // 因此abort方法要在前面。不过日志也理应在事务操作之前添加
+            if (transaction.getStatus().equals(Transaction.Status.RUNNING)) {
                 abort(transNum);
                 transaction.setStatus(Transaction.Status.RECOVERY_ABORTING);
-                break;
-            default:
-                break;
+            }
+
         }
+        return;
     }
 
-    private boolean judgeAdvance(Transaction.Status status1, Transaction.Status status2) {
-        if (status1.equals(Transaction.Status.RUNNING)) return false;
-        if (status1.equals(Transaction.Status.ABORTING) || status1.equals(Transaction.Status.COMMITTING)) {
-            return status2.equals(Transaction.Status.RUNNING);
-        }
-        return true;
-    }
+
 
 
     /**
