@@ -736,6 +736,48 @@ public class ARIESRecoveryManager implements RecoveryManager {
      */
     void restartRedo() {
         // TODO(proj5): implement
+        long lowestRecLSN = Integer.MAX_VALUE;
+        for(Long pageNum: dirtyPageTable.keySet()){
+            lowestRecLSN = Math.min(lowestRecLSN, dirtyPageTable.get(pageNum));
+        }
+        Iterator<LogRecord> iterator = logManager.scanFrom(lowestRecLSN);
+        while(iterator.hasNext()){
+            LogRecord logRecord = iterator.next();
+            boolean isRedoable = false;
+            boolean isPageRelated = false;
+            boolean isInDPT = false;
+            boolean isLSNNotLessThanRec = false;
+            boolean isPageLSNLessThanLSN = false;
+
+            if(logRecord.isRedoable()) isRedoable = true;
+
+            if(logRecord instanceof UpdatePageLogRecord ||
+                    logRecord instanceof AllocPageLogRecord ||
+                    logRecord instanceof FreePageLogRecord ||
+                    logRecord instanceof UndoUpdatePageLogRecord ||
+                    logRecord instanceof UndoAllocPageLogRecord ||
+                    logRecord instanceof UndoFreePageLogRecord){
+                isPageRelated = true;
+            }
+
+            if(isPageRelated){
+                long pageNum = logRecord.getPageNum().get();
+
+                if(dirtyPageTable.containsKey(pageNum)) isInDPT = true;
+
+                long LSN = logRecord.getLSN();
+                long recLSN = dirtyPageTable.get(pageNum);
+                if(LSN >= recLSN) isLSNNotLessThanRec = true;
+
+                Page page = bufferManager.fetchPage(new DummyLockContext(), pageNum);
+                long pageLSN = page.getPageLSN();
+                if(pageLSN < LSN) isPageLSNLessThanLSN = true;
+            }
+
+            if(isRedoable && (!isPageRelated || (isInDPT&&isLSNNotLessThanRec&&isPageLSNLessThanLSN))){
+                logRecord.redo(this, diskSpaceManager, bufferManager);
+            }
+        }
         return;
     }
 
@@ -754,8 +796,44 @@ public class ARIESRecoveryManager implements RecoveryManager {
      */
     void restartUndo() {
         // TODO(proj5): implement
+        PriorityQueue<Pair<Long, Long>> pq = new PriorityQueue<Pair<Long, Long>>(new PairFirstReverseComparator<Long, Long>());
+        for (Map.Entry<Long, TransactionTableEntry> entry : transactionTable.entrySet()) {
+            if (!entry.getValue().transaction.getStatus().equals(Transaction.Status.RECOVERY_ABORTING)) {
+                continue;
+            }
+            pq.add(new Pair<>(entry.getValue().lastLSN, entry.getKey()));
+        }
+
+        while (pq.size() > 0) {
+            Pair<Long, Long> curPair = pq.poll();
+            TransactionTableEntry tte = transactionTable.get(curPair.getSecond());
+            LogRecord currLR = logManager.fetchLogRecord(curPair.getFirst());
+            if (currLR.isUndoable()) {
+                if (currLR.getPageNum().isPresent()) {
+                    if (dirtyPageTable.containsKey(currLR.getPageNum().get())) {
+                        if (currLR.getLSN() == dirtyPageTable.get(currLR.getPageNum().get())) {
+                            dirtyPageTable.remove(currLR.getPageNum().get());
+                        }
+                    }
+                }
+                LogRecord tmplr = currLR.undo(tte.lastLSN);
+                logManager.appendToLog(tmplr);
+                tte.lastLSN = tmplr.getLSN();
+                tmplr.redo(this, diskSpaceManager, bufferManager);
+            }
+            Long newLSN = currLR.getUndoNextLSN().isPresent() ? currLR.getUndoNextLSN().get() : currLR.getPrevLSN().get();
+            if (newLSN == 0) {
+                tte.transaction.cleanup();
+                tte.transaction.setStatus(Transaction.Status.COMPLETE);
+                logManager.appendToLog(new EndTransactionLogRecord(curPair.getSecond(), tte.lastLSN));
+                transactionTable.remove(curPair.getSecond());
+            } else {
+                pq.add(new Pair<>(newLSN, curPair.getSecond()));
+            }
+        }
         return;
     }
+
 
     /**
      * Removes pages from the DPT that are not dirty in the buffer manager.
