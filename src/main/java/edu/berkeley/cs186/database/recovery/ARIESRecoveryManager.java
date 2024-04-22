@@ -745,10 +745,7 @@ public class ARIESRecoveryManager implements RecoveryManager {
      */
     void restartRedo() {
         // TODO(proj5): implement
-        long lowestRecLSN = Integer.MAX_VALUE;
-        for(Long pageNum: dirtyPageTable.keySet()){
-            lowestRecLSN = Math.min(lowestRecLSN, dirtyPageTable.get(pageNum));
-        }
+        long lowestRecLSN = calculateLowestRecLSN();
         Iterator<LogRecord> iterator = logManager.scanFrom(lowestRecLSN);
         while(iterator.hasNext()){
             LogRecord logRecord = iterator.next();
@@ -788,6 +785,14 @@ public class ARIESRecoveryManager implements RecoveryManager {
             }
         }
         return;
+    }
+
+    private long calculateLowestRecLSN() {
+        long lowestRecLSN = Integer.MAX_VALUE;
+        for(Long pageNum: dirtyPageTable.keySet()){
+            lowestRecLSN = Math.min(lowestRecLSN, dirtyPageTable.get(pageNum));
+        }
+        return lowestRecLSN;
     }
 
     /**
