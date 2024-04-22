@@ -240,23 +240,12 @@ public class ARIESRecoveryManager implements RecoveryManager {
         // TODO(proj5): implement
         TransactionTableEntry transactionTableEntry = this.transactionTable.get(transNum);
         long LSN = transactionTableEntry.lastLSN;
-        int pageSize = before.length;
-        if (pageSize <= BufferManager.EFFECTIVE_PAGE_SIZE / 2) {
-            long firstLSN = logManager.appendToLog(new UpdatePageLogRecord(transNum, pageNum, LSN, pageOffset, before, after));
-            if (!dirtyPageTable.containsKey(pageNum)) {
-                dirtyPageTable.put(pageNum, firstLSN);
-            }
-            transactionTableEntry.lastLSN = firstLSN;
-            return firstLSN;
-        } else {
-            long firstLSN = logManager.appendToLog(new UpdatePageLogRecord(transNum, pageNum, LSN, pageOffset, before, new byte[0]));
-            long secondLSN = logManager.appendToLog(new UpdatePageLogRecord(transNum, pageNum, firstLSN, pageOffset, new byte[0], after));
-            if (!dirtyPageTable.containsKey(pageNum)) {
-                dirtyPageTable.put(pageNum, firstLSN);
-            }
-            transactionTableEntry.lastLSN = secondLSN;
-            return secondLSN;
+        long firstLSN = logManager.appendToLog(new UpdatePageLogRecord(transNum, pageNum, LSN, pageOffset, before, after));
+        if (!dirtyPageTable.containsKey(pageNum)) {
+            dirtyPageTable.put(pageNum, firstLSN);
         }
+        transactionTableEntry.lastLSN = firstLSN;
+        return firstLSN;
     }
 
     /**
