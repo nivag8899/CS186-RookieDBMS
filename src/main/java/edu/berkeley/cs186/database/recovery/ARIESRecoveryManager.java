@@ -441,46 +441,6 @@ public class ARIESRecoveryManager implements RecoveryManager {
      * Finally, the master record should be rewritten with the LSN of the
      * begin checkpoint record.
      */
-//    @Override
-//    public synchronized void checkpoint() {
-//        // Create begin checkpoint log record and write to log
-//        LogRecord beginRecord = new BeginCheckpointLogRecord();
-//        long beginLSN = logManager.appendToLog(beginRecord);
-//
-//        Map<Long, Long> chkptDPT = new HashMap<>();
-//        Map<Long, Pair<Transaction.Status, Long>> chkptTxnTable = new HashMap<>();
-//
-//        // TODO(proj5): generate end checkpoint record(s) for DPT and transaction table
-//        for (long pageNum : dirtyPageTable.keySet()) {
-//            if (!EndCheckpointLogRecord.fitsInOneRecord(chkptDPT.size() + 1, 0)) {
-//                LogRecord endCheckpointLogRecord = new EndCheckpointLogRecord(chkptDPT, chkptTxnTable);
-//                logManager.appendToLog(endCheckpointLogRecord);
-//                chkptDPT.clear();
-//            }
-//            chkptDPT.put(pageNum, dirtyPageTable.get(pageNum));
-//        }
-//
-//        for (long tranNum : transactionTable.keySet()) {
-//            if (!EndCheckpointLogRecord.fitsInOneRecord(chkptDPT.size(), chkptTxnTable.size() + 1)) {
-//                LogRecord endCheckpointLogRecord = new EndCheckpointLogRecord(chkptDPT, chkptTxnTable);
-//                logManager.appendToLog(endCheckpointLogRecord);
-//                chkptDPT.clear();
-//                chkptTxnTable.clear();
-//            }
-//            chkptTxnTable.put(tranNum, new Pair<>(transactionTable.get(tranNum).transaction.getStatus(), transactionTable.get(tranNum).lastLSN));
-//        }
-//
-//        // Last end checkpoint record
-//        LogRecord endRecord = new EndCheckpointLogRecord(chkptDPT, chkptTxnTable);
-//        logManager.appendToLog(endRecord);
-//        // Ensure checkpoint is fully flushed before updating the master record
-//        flushToLSN(endRecord.getLSN());
-//
-//        // Update master record
-//        MasterLogRecord masterRecord = new MasterLogRecord(beginLSN);
-//        logManager.rewriteMasterRecord(masterRecord);
-//    }
-
     @Override
     public synchronized void checkpoint() {
         // Create begin checkpoint log record and write to log
@@ -490,7 +450,6 @@ public class ARIESRecoveryManager implements RecoveryManager {
         Map<Long, Long> chkptDPT = new HashMap<>();
         Map<Long, Pair<Transaction.Status, Long>> chkptTxnTable = new HashMap<>();
 
-        // Refactor logging for dirty page table and transaction table
         logCheckpointData(dirtyPageTable, chkptDPT, chkptTxnTable, true);
         logCheckpointData(transactionTable, chkptDPT, chkptTxnTable, false);
 
@@ -528,7 +487,6 @@ public class ARIESRecoveryManager implements RecoveryManager {
         chkptDPT.clear();
         chkptTxnTable.clear();
     }
-
 
 
     /**
@@ -579,6 +537,145 @@ public class ARIESRecoveryManager implements RecoveryManager {
         this.checkpoint();
     }
 
+    private void handleTransactionOperation(LogRecord logRecord) {
+        if (logRecord.getTransNum().isPresent()) {
+            Long transNum = logRecord.getTransNum().get();
+            if (!transactionTable.containsKey(transNum)) {
+                startTransaction(newTransaction.apply(transNum));
+            }
+            transactionTable.get(transNum).lastLSN = logRecord.getLSN();
+        }
+    }
+
+    private void handlePageOperation(LogRecord logRecord) {
+        if (logRecord.getPageNum().isPresent()) {
+            LogType type = logRecord.getType();
+            if (type.equals(LogType.UPDATE_PAGE) || type.equals(LogType.UNDO_UPDATE_PAGE)) {
+                dirtyPage(logRecord.getPageNum().get(), logRecord.getLSN());
+            }
+            if (type.equals(LogType.FREE_PAGE) || type.equals(LogType.UNDO_ALLOC_PAGE)) {
+                pageFlushHook(logRecord.getLSN());
+                dirtyPageTable.remove(logRecord.getPageNum().get());
+            }
+        }
+    }
+    private void handleTransactionStatusChange(LogRecord logRecord, Set<Long> endedTransactions) {
+        if (!logRecord.getTransNum().isPresent()) return;
+
+        Long transNum = logRecord.getTransNum().get();
+        TransactionTableEntry tableEntry = transactionTable.get(transNum);
+        if (tableEntry == null) return;  // 检查tableEntry是否为空，避免空指针异常
+
+        switch (logRecord.getType()) {
+            case COMMIT_TRANSACTION:
+                tableEntry.transaction.setStatus(Transaction.Status.COMMITTING);
+                break;
+            case ABORT_TRANSACTION:
+                tableEntry.transaction.setStatus(Transaction.Status.RECOVERY_ABORTING);
+                break;
+            case END_TRANSACTION:
+                endTransaction(transNum, tableEntry,endedTransactions);
+                break;
+        }
+    }
+
+    private void endTransaction(Long transNum, TransactionTableEntry tableEntry,Set<Long> endedTransactions) {
+        tableEntry.transaction.cleanup();
+        transactionTable.remove(transNum);
+        endedTransactions.add(transNum);
+        tableEntry.transaction.setStatus(Transaction.Status.COMPLETE);
+    }
+
+
+    void restartAnalysis() {
+        // Read master record
+        LogRecord record = logManager.fetchLogRecord(0L);
+        // Type checking
+        assert (record != null && record.getType() == LogType.MASTER);
+        MasterLogRecord masterRecord = (MasterLogRecord) record;
+        // Get start checkpoint LSN
+        long LSN = masterRecord.lastCheckpointLSN;
+        // Set of transactions that have completed
+        Set<Long> endedTransactions = new HashSet<>();
+
+        // TODO(proj5): implement
+        Iterator<LogRecord> iterator = logManager.scanFrom(LSN);
+        while (iterator.hasNext()) {
+            LogRecord logRecord = iterator.next();
+            handleTransactionOperation(logRecord);
+            handlePageOperation(logRecord);
+            handlePageOperation(logRecord);
+            handleTransactionStatusChange(logRecord,endedTransactions);
+            handleEndCheckpoint(logRecord,endedTransactions);
+        }
+        finalizeTransactions();
+    }
+
+    private void handleEndCheckpoint(LogRecord logRecord, Set<Long> endTransactions) {
+        if (logRecord.getType().equals(LogType.END_CHECKPOINT)) {
+            // update ATT
+            Map<Long, Pair<Transaction.Status, Long>> checkpointTransactionTable = logRecord.getTransactionTable();
+            for (Long tranNum : checkpointTransactionTable.keySet()) {
+                if (endTransactions.contains(tranNum)) {
+                    continue;
+                }
+                Pair<Transaction.Status, Long> pair = checkpointTransactionTable.get(tranNum);
+                if (!transactionTable.containsKey(tranNum)) {
+                    startTransaction(newTransaction.apply(tranNum));
+                    transactionTable.get(tranNum).lastLSN = pair.getSecond();
+                }
+                // update the lastLSN
+                transactionTable.get(tranNum).lastLSN = Math.max(transactionTable.get(tranNum).lastLSN, pair.getSecond());
+                // update the Transaction Status if is more advanced than what we have in memory
+                // 检查是否有必要更新事务状态, 有则更新. 注意ABORTING要改为RECOVERY_ABORTING, Ended的事务要让它结束掉
+                if (!judgeAdvance(transactionTable.get(tranNum).transaction.getStatus(), pair.getFirst())) {
+                    if (pair.getFirst().equals(Transaction.Status.ABORTING)) {
+                        // 就是把Aborting换成Recovery_aborting
+                        transactionTable.get(tranNum).transaction.setStatus(Transaction.Status.RECOVERY_ABORTING);
+                    } else {
+                        transactionTable.get(tranNum).transaction.setStatus(pair.getFirst());
+                    }
+                }
+            }
+
+            // update DPT
+            Map<Long, Long> checkpointDirtyPageTable = logRecord.getDirtyPageTable();
+            for (Long tranNum : checkpointDirtyPageTable.keySet()) {
+                // 因为checkpoing记录的recLSN一定是最早的
+                if (!dirtyPageTable.containsKey(tranNum)) {
+                    dirtyPageTable.put(tranNum, checkpointDirtyPageTable.get(tranNum));
+                } else {
+                    dirtyPageTable.put(tranNum, Math.min(checkpointDirtyPageTable.get(tranNum), dirtyPageTable.get(tranNum)));
+                }
+
+            }
+
+        }
+    }
+
+    private void finalizeTransactions() {
+        // Final cleanup of transactions
+        for (Long transNum : transactionTable.keySet()) {
+            TransactionTableEntry transactionTableEntry = transactionTable.get(transNum);
+            Transaction transaction = transactionTableEntry.transaction;
+            if (transaction.getStatus().equals(Transaction.Status.COMMITTING)) {
+                transaction.cleanup();
+                end(transNum);
+            }
+            if (transaction.getStatus().equals(Transaction.Status.RUNNING)) {
+                abort(transNum);
+                transaction.setStatus(Transaction.Status.RECOVERY_ABORTING);
+            }
+        }
+    }
+
+    private boolean judgeAdvance(Transaction.Status status1, Transaction.Status status2) {
+        if (status1.equals(Transaction.Status.RUNNING)) return false;
+        if (status1.equals(Transaction.Status.ABORTING) || status1.equals(Transaction.Status.COMMITTING)) {
+            return status2.equals(Transaction.Status.RUNNING);
+        }
+        return true;
+    }
     /**
      * This method performs the analysis pass of restart recovery.
      * <p>
@@ -620,130 +717,6 @@ public class ARIESRecoveryManager implements RecoveryManager {
      * record
      * - if RECOVERY_ABORTING: no action needed
      */
-//
-    private boolean judgeAdvance(Transaction.Status type1, Transaction.Status type2) {
-        if (type1.equals(Transaction.Status.RUNNING)) return false;
-        if (type1.equals(Transaction.Status.ABORTING) || type1.equals(Transaction.Status.COMMITTING)) {
-            return type2.equals(Transaction.Status.RUNNING);
-        }
-        return true;
-    }
-
-    void restartAnalysis() {
-        // Read master record
-        LogRecord record = logManager.fetchLogRecord(0L);
-        // Type checking
-        assert (record != null && record.getType() == LogType.MASTER);
-        MasterLogRecord masterRecord = (MasterLogRecord) record;
-        // Get start checkpoint LSN
-        long LSN = masterRecord.lastCheckpointLSN;
-        // Set of transactions that have completed
-        Set<Long> endedTransactions = new HashSet<>();
-        // TODO(proj5): implement
-        Iterator<LogRecord> iterator = logManager.scanFrom(LSN);
-        while (iterator.hasNext()) {
-            LogRecord logRecord = iterator.next();
-            // 如果这是一次事务操作
-            if (logRecord.getTransNum().isPresent()) {
-                Long transNum = logRecord.getTransNum().get();
-                // 如果是一个新事务，就将其添加到事务表里
-                if (transactionTable.get(transNum) == null) {
-                    Transaction transaction = newTransaction.apply(transNum);
-                    startTransaction(transaction);
-                }
-                // 更新事务的LSN
-                TransactionTableEntry tableEntry = transactionTable.get(transNum);
-                tableEntry.lastLSN = logRecord.getLSN();
-            }
-            // 如果是数据页操作
-            if (logRecord.getPageNum().isPresent()) {
-                LogType type = logRecord.getType();
-                // 对于更新涉及写入的更新操作，将该页加入脏页表中
-                if (type.equals(LogType.UPDATE_PAGE) || type.equals(LogType.UNDO_UPDATE_PAGE)) {
-                    dirtyPage(logRecord.getPageNum().get(), logRecord.getLSN());
-                }
-                // 对于内存管理，先将更改写入磁盘，再从脏页表中移除
-                if (type.equals(LogType.FREE_PAGE) || type.equals(LogType.UNDO_ALLOC_PAGE)) {
-                    pageFlushHook(logRecord.getLSN());
-                    dirtyPageTable.remove(logRecord.getPageNum().get());
-                }
-                // 其余操作不需要管理
-            }
-
-            if (logRecord.getType().equals(LogType.COMMIT_TRANSACTION)) {
-                Long transNum = logRecord.getTransNum().get();
-                TransactionTableEntry tableEntry = transactionTable.get(transNum);
-                tableEntry.transaction.setStatus(Transaction.Status.COMMITTING);
-            }
-
-            if (logRecord.getType().equals(LogType.ABORT_TRANSACTION)) {
-                Long transNum = logRecord.getTransNum().get();
-                TransactionTableEntry tableEntry = transactionTable.get(transNum);
-                tableEntry.transaction.setStatus(Transaction.Status.RECOVERY_ABORTING);
-            }
-
-            // 如果是结束事务的日志，则需要先清除事务，从事务表移除，添加到endedTransactions,最后修改状态
-            if (logRecord.getType().equals(LogType.END_TRANSACTION)) {
-                Long transNum = logRecord.getTransNum().get();
-                TransactionTableEntry tableEntry = transactionTable.get(transNum);
-                tableEntry.transaction.cleanup();
-                transactionTable.remove(transNum);
-                endedTransactions.add(transNum);
-                tableEntry.transaction.setStatus(Transaction.Status.COMPLETE);
-            }
-
-            if (logRecord.getType().equals(LogType.END_CHECKPOINT)) {
-                // 对于检查点脏页表的数据，将其全部加入
-                Map<Long, Long> dpt = logRecord.getDirtyPageTable();
-                dirtyPageTable.putAll(dpt);
-                Map<Long, Pair<Transaction.Status, Long>> tTable = logRecord.getTransactionTable();
-                // 如果检查点的事务表中有事务不在恢复事务表中，就将其添加
-                // 更新事务表的LSN
-                for (Long transNum : tTable.keySet()) {
-                    if (endedTransactions.contains(transNum)) continue;
-                    if (!transactionTable.containsKey(transNum)) {
-                        startTransaction(newTransaction.apply(transNum));
-                    }
-                    Pair<Transaction.Status, Long> pair = tTable.get(transNum);
-                    TransactionTableEntry tableEntry = transactionTable.get(transNum);
-                    Long lsn = pair.getSecond();
-                    if (lsn >= tableEntry.lastLSN) {
-                        tableEntry.lastLSN = lsn;
-                    }
-                    // 如果存档点中的事务状态领先，则要进行修改
-                    if (judgeAdvance(pair.getFirst(), tableEntry.transaction.getStatus())) {
-                        // 如果是aborting则需要修改为recovery_abort
-                        if (pair.getFirst().equals(Transaction.Status.ABORTING)) {
-                            tableEntry.transaction.setStatus(Transaction.Status.RECOVERY_ABORTING);
-                        } else {
-                            tableEntry.transaction.setStatus(pair.getFirst());
-                        }
-                    }
-                }
-            }
-
-
-        }
-        for (Long transNum : transactionTable.keySet()) {
-            TransactionTableEntry tableEntry = transactionTable.get(transNum);
-            Transaction transaction = tableEntry.transaction;
-            // 这里cleanup必须在end前调用，因为end会修改状态，导致cleanup报错
-            if (transaction.getStatus().equals(Transaction.Status.COMMITTING)) {
-                transaction.cleanup();
-                end(transNum);
-            }
-            // 这里要注意以下顺序，abort()会将事务修改为abort状态，但我们这时候需要的是RECOVERY_ABORTING
-            // 因此abort方法要在前面。不过日志也理应在事务操作之前添加
-            if (transaction.getStatus().equals(Transaction.Status.RUNNING)) {
-                abort(transNum);
-                transaction.setStatus(Transaction.Status.RECOVERY_ABORTING);
-            }
-
-        }
-        return;
-    }
-
-
 
 
     /**
@@ -762,7 +735,7 @@ public class ARIESRecoveryManager implements RecoveryManager {
         // TODO(proj5): implement
         long lowestRecLSN = calculateLowestRecLSN();
         Iterator<LogRecord> iterator = logManager.scanFrom(lowestRecLSN);
-        while(iterator.hasNext()){
+        while (iterator.hasNext()) {
             LogRecord logRecord = iterator.next();
             boolean isRedoable = false;
             boolean isPageRelated = false;
@@ -770,32 +743,32 @@ public class ARIESRecoveryManager implements RecoveryManager {
             boolean isLSNNotLessThanRec = false;
             boolean isPageLSNLessThanLSN = false;
 
-            if(logRecord.isRedoable()) isRedoable = true;
+            if (logRecord.isRedoable()) isRedoable = true;
 
-            if(logRecord instanceof UpdatePageLogRecord ||
+            if (logRecord instanceof UpdatePageLogRecord ||
                     logRecord instanceof AllocPageLogRecord ||
                     logRecord instanceof FreePageLogRecord ||
                     logRecord instanceof UndoUpdatePageLogRecord ||
                     logRecord instanceof UndoAllocPageLogRecord ||
-                    logRecord instanceof UndoFreePageLogRecord){
+                    logRecord instanceof UndoFreePageLogRecord) {
                 isPageRelated = true;
             }
 
-            if(isPageRelated){
+            if (isPageRelated) {
                 long pageNum = logRecord.getPageNum().get();
 
-                if(dirtyPageTable.containsKey(pageNum)) isInDPT = true;
+                if (dirtyPageTable.containsKey(pageNum)) isInDPT = true;
 
                 long LSN = logRecord.getLSN();
                 long recLSN = dirtyPageTable.get(pageNum);
-                if(LSN >= recLSN) isLSNNotLessThanRec = true;
+                if (LSN >= recLSN) isLSNNotLessThanRec = true;
 
                 Page page = bufferManager.fetchPage(new DummyLockContext(), pageNum);
                 long pageLSN = page.getPageLSN();
-                if(pageLSN < LSN) isPageLSNLessThanLSN = true;
+                if (pageLSN < LSN) isPageLSNLessThanLSN = true;
             }
 
-            if(isRedoable && (!isPageRelated || (isInDPT&&isLSNNotLessThanRec&&isPageLSNLessThanLSN))){
+            if (isRedoable && (!isPageRelated || (isInDPT && isLSNNotLessThanRec && isPageLSNLessThanLSN))) {
                 logRecord.redo(this, diskSpaceManager, bufferManager);
             }
         }
@@ -804,7 +777,7 @@ public class ARIESRecoveryManager implements RecoveryManager {
 
     private long calculateLowestRecLSN() {
         long lowestRecLSN = Integer.MAX_VALUE;
-        for(Long pageNum: dirtyPageTable.keySet()){
+        for (Long pageNum : dirtyPageTable.keySet()) {
             lowestRecLSN = Math.min(lowestRecLSN, dirtyPageTable.get(pageNum));
         }
         return lowestRecLSN;
