@@ -587,6 +587,47 @@ public class ARIESRecoveryManager implements RecoveryManager {
         tableEntry.transaction.setStatus(Transaction.Status.COMPLETE);
     }
 
+    /**
+     * This method performs the analysis pass of restart recovery.
+     * <p>
+     * First, the master record should be read (LSN 0). The master record contains
+     * one piece of information: the LSN of the last successful checkpoint.
+     * <p>
+     * We then begin scanning log records, starting at the beginning of the
+     * last successful checkpoint.
+     * <p>
+     * If the log record is for a transaction operation (getTransNum is present)
+     * - update the transaction table
+     * <p>
+     * If the log record is page-related (getPageNum is present), update the dpt
+     * - update/undoupdate page will dirty pages
+     * - free/undoalloc page always flush changes to disk
+     * - no action needed for alloc/undofree page
+     * <p>
+     * If the log record is for a change in transaction status:
+     * - update transaction status to COMMITTING/RECOVERY_ABORTING/COMPLETE
+     * - update the transaction table
+     * - if END_TRANSACTION: clean up transaction (Transaction#cleanup), remove
+     * from txn table, and add to endedTransactions
+     * <p>
+     * If the log record is an end_checkpoint record:
+     * - Copy all entries of checkpoint DPT (replace existing entries if any)
+     * - Skip txn table entries for transactions that have already ended
+     * - Add to transaction table if not already present
+     * - Update lastLSN to be the larger of the existing entry's (if any) and
+     * the checkpoint's
+     * - The status's in the transaction table should be updated if it is possible
+     * to transition from the status in the table to the status in the
+     * checkpoint. For example, running -> aborting is a possible transition,
+     * but aborting -> running is not.
+     * <p>
+     * After all records in the log are processed, for each ttable entry:
+     * - if COMMITTING: clean up the transaction, change status to COMPLETE,
+     * remove from the ttable, and append an end record
+     * - if RUNNING: change status to RECOVERY_ABORTING, and append an abort
+     * record
+     * - if RECOVERY_ABORTING: no action needed
+     */
 
     void restartAnalysis() {
         // Read master record
@@ -677,47 +718,6 @@ public class ARIESRecoveryManager implements RecoveryManager {
         }
         return true;
     }
-    /**
-     * This method performs the analysis pass of restart recovery.
-     * <p>
-     * First, the master record should be read (LSN 0). The master record contains
-     * one piece of information: the LSN of the last successful checkpoint.
-     * <p>
-     * We then begin scanning log records, starting at the beginning of the
-     * last successful checkpoint.
-     * <p>
-     * If the log record is for a transaction operation (getTransNum is present)
-     * - update the transaction table
-     * <p>
-     * If the log record is page-related (getPageNum is present), update the dpt
-     * - update/undoupdate page will dirty pages
-     * - free/undoalloc page always flush changes to disk
-     * - no action needed for alloc/undofree page
-     * <p>
-     * If the log record is for a change in transaction status:
-     * - update transaction status to COMMITTING/RECOVERY_ABORTING/COMPLETE
-     * - update the transaction table
-     * - if END_TRANSACTION: clean up transaction (Transaction#cleanup), remove
-     * from txn table, and add to endedTransactions
-     * <p>
-     * If the log record is an end_checkpoint record:
-     * - Copy all entries of checkpoint DPT (replace existing entries if any)
-     * - Skip txn table entries for transactions that have already ended
-     * - Add to transaction table if not already present
-     * - Update lastLSN to be the larger of the existing entry's (if any) and
-     * the checkpoint's
-     * - The status's in the transaction table should be updated if it is possible
-     * to transition from the status in the table to the status in the
-     * checkpoint. For example, running -> aborting is a possible transition,
-     * but aborting -> running is not.
-     * <p>
-     * After all records in the log are processed, for each ttable entry:
-     * - if COMMITTING: clean up the transaction, change status to COMPLETE,
-     * remove from the ttable, and append an end record
-     * - if RUNNING: change status to RECOVERY_ABORTING, and append an abort
-     * record
-     * - if RECOVERY_ABORTING: no action needed
-     */
 
 
     /**
@@ -732,57 +732,51 @@ public class ARIESRecoveryManager implements RecoveryManager {
      * the dirty page table with LSN >= recLSN, the page is fetched from disk,
      * the pageLSN is checked, and the record is redone if needed.
      */
+
     void restartRedo() {
-        // TODO(proj5): implement
-        long lowestRecLSN = calculateLowestRecLSN();
-        Iterator<LogRecord> iterator = logManager.scanFrom(lowestRecLSN);
-        while (iterator.hasNext()) {
-            LogRecord logRecord = iterator.next();
-            boolean isRedoable = false;
-            boolean isPageRelated = false;
-            boolean isInDPT = false;
-            boolean isLSNNotLessThanRec = false;
-            boolean isPageLSNLessThanLSN = false;
-
-            if (logRecord.isRedoable()) isRedoable = true;
-
-            if (logRecord instanceof UpdatePageLogRecord ||
-                    logRecord instanceof AllocPageLogRecord ||
-                    logRecord instanceof FreePageLogRecord ||
-                    logRecord instanceof UndoUpdatePageLogRecord ||
-                    logRecord instanceof UndoAllocPageLogRecord ||
-                    logRecord instanceof UndoFreePageLogRecord) {
-                isPageRelated = true;
-            }
-
-            if (isPageRelated) {
-                long pageNum = logRecord.getPageNum().get();
-
-                if (dirtyPageTable.containsKey(pageNum)) isInDPT = true;
-
-                long LSN = logRecord.getLSN();
-                long recLSN = dirtyPageTable.get(pageNum);
-                if (LSN >= recLSN) isLSNNotLessThanRec = true;
-
-                Page page = bufferManager.fetchPage(new DummyLockContext(), pageNum);
-                long pageLSN = page.getPageLSN();
-                if (pageLSN < LSN) isPageLSNLessThanLSN = true;
-            }
-
-            if (isRedoable && (!isPageRelated || (isInDPT && isLSNNotLessThanRec && isPageLSNLessThanLSN))) {
+        Optional<Long> minRecLSN = dirtyPageTable.values().stream().min(Long::compareTo);
+        if (!minRecLSN.isPresent()) {
+            return;
+        }
+        Iterator<LogRecord> logRecordIterator = logManager.scanFrom(minRecLSN.get());
+        while (logRecordIterator.hasNext()) {
+            LogRecord logRecord = logRecordIterator.next();
+            LogType logType = logRecord.getType();
+            if (isAllocationOrFreeOperation(logType)) {
                 logRecord.redo(this, diskSpaceManager, bufferManager);
             }
+            if (isModifyOperation(logType)) {
+                Long pageNum = logRecord.getPageNum().get();
+                if (dirtyPageTable.containsKey(pageNum)
+                        && logRecord.getLSN() >= dirtyPageTable.get(pageNum)) {
+                    Page page = bufferManager.fetchPage(new DummyLockContext(), pageNum);
+                    try {
+                        if (page.getPageLSN() < logRecord.getLSN()) {
+                            logRecord.redo(this, diskSpaceManager, bufferManager);
+                        }
+                    } finally {
+                        page.unpin();
+                    }
+                }
+            }
         }
-        return;
     }
 
-    private long calculateLowestRecLSN() {
-        long lowestRecLSN = Integer.MAX_VALUE;
-        for (Long pageNum : dirtyPageTable.keySet()) {
-            lowestRecLSN = Math.min(lowestRecLSN, dirtyPageTable.get(pageNum));
-        }
-        return lowestRecLSN;
+    private boolean isModifyOperation(LogType logType) {
+        return logType.equals(LogType.UPDATE_PAGE) || logType.equals(LogType.UNDO_UPDATE_PAGE)
+                || logType.equals(LogType.UNDO_ALLOC_PAGE) || logType.equals(LogType.FREE_PAGE);
     }
+
+    private boolean isAllocationOrFreeOperation(LogType logType) {
+        return logType.equals(LogType.ALLOC_PART)
+                || logType.equals(LogType.FREE_PART)
+                || logType.equals(LogType.UNDO_FREE_PART)
+                || logType.equals(LogType.UNDO_ALLOC_PART)
+                || logType.equals(LogType.ALLOC_PAGE)
+                || logType.equals(LogType.UNDO_FREE_PAGE)
+                ;
+    }
+
 
     /**
      * This method performs the undo pass of restart recovery.
