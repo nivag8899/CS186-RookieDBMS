@@ -791,44 +791,45 @@ public class ARIESRecoveryManager implements RecoveryManager {
      * - if the new LSN is 0, clean up the transaction, set the status to complete,
      * and remove from transaction table.
      */
+    private PriorityQueue<Pair<Long, Long>> initializePriorityQueueForUNDO() {
+        PriorityQueue<Pair<Long, Long>> pq = new PriorityQueue<>(new PairFirstReverseComparator<>());
+        transactionTable.forEach((transId, tte) -> {
+            if (tte.transaction.getStatus() == Transaction.Status.RECOVERY_ABORTING) {
+                pq.add(new Pair<>(tte.lastLSN, transId));
+            }
+        });
+        return pq;
+    }
+
     void restartUndo() {
         // TODO(proj5): implement
-        PriorityQueue<Pair<Long, Long>> pq = new PriorityQueue<Pair<Long, Long>>(new PairFirstReverseComparator<Long, Long>());
-        for (Map.Entry<Long, TransactionTableEntry> entry : transactionTable.entrySet()) {
-            if (!entry.getValue().transaction.getStatus().equals(Transaction.Status.RECOVERY_ABORTING)) {
-                continue;
-            }
-            pq.add(new Pair<>(entry.getValue().lastLSN, entry.getKey()));
-        }
-
-        while (!pq.isEmpty()) {
-            Pair<Long, Long> curPair = pq.poll();
-            TransactionTableEntry tte = transactionTable.get(curPair.getSecond());
-            LogRecord currentLR = logManager.fetchLogRecord(curPair.getFirst());
-            if (currentLR.isUndoable()) {
-                if (currentLR.getPageNum().isPresent()) {
-                    if (dirtyPageTable.containsKey(currentLR.getPageNum().get())) {
-                        if (currentLR.getLSN() == dirtyPageTable.get(currentLR.getPageNum().get())) {
-                            dirtyPageTable.remove(currentLR.getPageNum().get());
-                        }
-                    }
+        PriorityQueue<Pair<Long, Long>> undoLSNs = initializePriorityQueueForUNDO();
+        while (!undoLSNs.isEmpty()) {
+            Pair<Long, Long> curPair = undoLSNs.poll();
+            TransactionTableEntry transactionTableEntry = transactionTable.get(curPair.getSecond());
+            LogRecord currLogRecord = logManager.fetchLogRecord(curPair.getFirst());
+            if (currLogRecord.isUndoable()) {
+                if (currLogRecord.getPageNum().isPresent()
+                        && dirtyPageTable.containsKey(currLogRecord.getPageNum().get())
+                        && currLogRecord.getLSN() == dirtyPageTable.get(currLogRecord.getPageNum().get())) {
+                    dirtyPageTable.remove(currLogRecord.getPageNum().get());
                 }
-                LogRecord tmplr = currentLR.undo(tte.lastLSN);
-                logManager.appendToLog(tmplr);
-                tte.lastLSN = tmplr.getLSN();
-                tmplr.redo(this, diskSpaceManager, bufferManager);
+                LogRecord CLR = currLogRecord.undo(transactionTableEntry.lastLSN);
+                logManager.appendToLog(CLR);
+                transactionTableEntry.lastLSN = CLR.getLSN();
+                CLR.redo(this, diskSpaceManager, bufferManager);
             }
-            Long newLSN = currentLR.getUndoNextLSN().isPresent() ? currentLR.getUndoNextLSN().get() : currentLR.getPrevLSN().get();
+
+            Long newLSN = currLogRecord.getUndoNextLSN().orElse(currLogRecord.getPrevLSN().orElse(0L));
             if (newLSN == 0) {
-                tte.transaction.cleanup();
-                tte.transaction.setStatus(Transaction.Status.COMPLETE);
-                logManager.appendToLog(new EndTransactionLogRecord(curPair.getSecond(), tte.lastLSN));
+                transactionTableEntry.transaction.cleanup();
+                transactionTableEntry.transaction.setStatus(Transaction.Status.COMPLETE);
+                logManager.appendToLog(new EndTransactionLogRecord(curPair.getSecond(), transactionTableEntry.lastLSN));
                 transactionTable.remove(curPair.getSecond());
             } else {
-                pq.add(new Pair<>(newLSN, curPair.getSecond()));
+                undoLSNs.add(new Pair<>(newLSN, curPair.getSecond()));
             }
         }
-        return;
     }
 
 
@@ -850,7 +851,7 @@ public class ARIESRecoveryManager implements RecoveryManager {
         }
     }
 
-    // Helpers /////////////////////////////////////////////////////////////////
+// Helpers /////////////////////////////////////////////////////////////////
 
     /**
      * Comparator for Pair<A, B> comparing only on the first element (type A),
