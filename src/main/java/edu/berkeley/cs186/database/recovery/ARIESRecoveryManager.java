@@ -559,6 +559,7 @@ public class ARIESRecoveryManager implements RecoveryManager {
             }
         }
     }
+
     private void handleTransactionStatusChange(LogRecord logRecord, Set<Long> endedTransactions) {
         if (!logRecord.getTransNum().isPresent()) return;
 
@@ -574,12 +575,12 @@ public class ARIESRecoveryManager implements RecoveryManager {
                 tableEntry.transaction.setStatus(Transaction.Status.RECOVERY_ABORTING);
                 break;
             case END_TRANSACTION:
-                endTransaction(transNum, tableEntry,endedTransactions);
+                endTransaction(transNum, tableEntry, endedTransactions);
                 break;
         }
     }
 
-    private void endTransaction(Long transNum, TransactionTableEntry tableEntry,Set<Long> endedTransactions) {
+    private void endTransaction(Long transNum, TransactionTableEntry tableEntry, Set<Long> endedTransactions) {
         tableEntry.transaction.cleanup();
         transactionTable.remove(transNum);
         endedTransactions.add(transNum);
@@ -605,52 +606,52 @@ public class ARIESRecoveryManager implements RecoveryManager {
             handleTransactionOperation(logRecord);
             handlePageOperation(logRecord);
             handlePageOperation(logRecord);
-            handleTransactionStatusChange(logRecord,endedTransactions);
-            handleEndCheckpoint(logRecord,endedTransactions);
+            handleTransactionStatusChange(logRecord, endedTransactions);
+            handleEndCheckpoint(logRecord, endedTransactions);
         }
         finalizeTransactions();
     }
 
+
     private void handleEndCheckpoint(LogRecord logRecord, Set<Long> endTransactions) {
-        if (logRecord.getType().equals(LogType.END_CHECKPOINT)) {
-            // update ATT
-            Map<Long, Pair<Transaction.Status, Long>> checkpointTransactionTable = logRecord.getTransactionTable();
-            for (Long tranNum : checkpointTransactionTable.keySet()) {
-                if (endTransactions.contains(tranNum)) {
-                    continue;
-                }
-                Pair<Transaction.Status, Long> pair = checkpointTransactionTable.get(tranNum);
-                if (!transactionTable.containsKey(tranNum)) {
-                    startTransaction(newTransaction.apply(tranNum));
-                    transactionTable.get(tranNum).lastLSN = pair.getSecond();
-                }
-                // update the lastLSN
-                transactionTable.get(tranNum).lastLSN = Math.max(transactionTable.get(tranNum).lastLSN, pair.getSecond());
-                // update the Transaction Status if is more advanced than what we have in memory
-                // 检查是否有必要更新事务状态, 有则更新. 注意ABORTING要改为RECOVERY_ABORTING, Ended的事务要让它结束掉
-                if (!judgeAdvance(transactionTable.get(tranNum).transaction.getStatus(), pair.getFirst())) {
-                    if (pair.getFirst().equals(Transaction.Status.ABORTING)) {
-                        // 就是把Aborting换成Recovery_aborting
-                        transactionTable.get(tranNum).transaction.setStatus(Transaction.Status.RECOVERY_ABORTING);
-                    } else {
-                        transactionTable.get(tranNum).transaction.setStatus(pair.getFirst());
-                    }
-                }
-            }
-
-            // update DPT
-            Map<Long, Long> checkpointDirtyPageTable = logRecord.getDirtyPageTable();
-            for (Long tranNum : checkpointDirtyPageTable.keySet()) {
-                // 因为checkpoing记录的recLSN一定是最早的
-                if (!dirtyPageTable.containsKey(tranNum)) {
-                    dirtyPageTable.put(tranNum, checkpointDirtyPageTable.get(tranNum));
-                } else {
-                    dirtyPageTable.put(tranNum, Math.min(checkpointDirtyPageTable.get(tranNum), dirtyPageTable.get(tranNum)));
-                }
-
-            }
-
+        if (!LogType.END_CHECKPOINT.equals(logRecord.getType())) {
+            return;
         }
+
+        processTransactionUpdates(logRecord, endTransactions);
+        updateDirtyPageTable(logRecord);
+    }
+
+    private void processTransactionUpdates(LogRecord logRecord, Set<Long> endTransactions) {
+        Map<Long, Pair<Transaction.Status, Long>> checkpointTransactionTable = logRecord.getTransactionTable();
+        for (Map.Entry<Long, Pair<Transaction.Status, Long>> entry : checkpointTransactionTable.entrySet()) {
+            Long tranNum = entry.getKey();
+            Pair<Transaction.Status, Long> pair = entry.getValue();
+            if (endTransactions.contains(tranNum)) {
+                continue;
+            }
+            transactionTable.compute(tranNum, (key, tableEntry) -> {
+                if (tableEntry == null) {
+                    tableEntry = new TransactionTableEntry(newTransaction.apply(tranNum));
+                }
+                tableEntry.lastLSN = Math.max(tableEntry.lastLSN, pair.getSecond());
+                updateTransactionStatus(tableEntry, pair.getFirst());
+                return tableEntry;
+            });
+        }
+    }
+
+    private void updateTransactionStatus(TransactionTableEntry entry, Transaction.Status status) {
+        if (!judgeAdvance(entry.transaction.getStatus(), status)) {
+            entry.transaction.setStatus(status == Transaction.Status.ABORTING ?
+                    Transaction.Status.RECOVERY_ABORTING : status);
+        }
+    }
+
+    private void updateDirtyPageTable(LogRecord logRecord) {
+        Map<Long, Long> checkpointDirtyPageTable = logRecord.getDirtyPageTable();
+        checkpointDirtyPageTable.forEach((pageNum, LSN) ->
+                dirtyPageTable.merge(pageNum, LSN, Math::min));
     }
 
     private void finalizeTransactions() {
