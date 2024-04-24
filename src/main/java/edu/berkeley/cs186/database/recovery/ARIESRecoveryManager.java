@@ -242,12 +242,12 @@ public class ARIESRecoveryManager implements RecoveryManager {
         // TODO(proj5): implement
         TransactionTableEntry transactionTableEntry = this.transactionTable.get(transNum);
         long LSN = transactionTableEntry.lastLSN;
-        long firstLSN = logManager.appendToLog(new UpdatePageLogRecord(transNum, pageNum, LSN, pageOffset, before, after));
+        long lastLSN = logManager.appendToLog(new UpdatePageLogRecord(transNum, pageNum, LSN, pageOffset, before, after));
         if (!dirtyPageTable.containsKey(pageNum)) {
-            dirtyPageTable.put(pageNum, firstLSN);
+            dirtyPageTable.put(pageNum, lastLSN);
         }
-        transactionTableEntry.lastLSN = firstLSN;
-        return firstLSN;
+        transactionTableEntry.lastLSN = lastLSN;
+        return lastLSN;
     }
 
     /**
@@ -441,6 +441,46 @@ public class ARIESRecoveryManager implements RecoveryManager {
      * Finally, the master record should be rewritten with the LSN of the
      * begin checkpoint record.
      */
+//    @Override
+//    public synchronized void checkpoint() {
+//        // Create begin checkpoint log record and write to log
+//        LogRecord beginRecord = new BeginCheckpointLogRecord();
+//        long beginLSN = logManager.appendToLog(beginRecord);
+//
+//        Map<Long, Long> chkptDPT = new HashMap<>();
+//        Map<Long, Pair<Transaction.Status, Long>> chkptTxnTable = new HashMap<>();
+//
+//        // TODO(proj5): generate end checkpoint record(s) for DPT and transaction table
+//        for (long pageNum : dirtyPageTable.keySet()) {
+//            if (!EndCheckpointLogRecord.fitsInOneRecord(chkptDPT.size() + 1, 0)) {
+//                LogRecord endCheckpointLogRecord = new EndCheckpointLogRecord(chkptDPT, chkptTxnTable);
+//                logManager.appendToLog(endCheckpointLogRecord);
+//                chkptDPT.clear();
+//            }
+//            chkptDPT.put(pageNum, dirtyPageTable.get(pageNum));
+//        }
+//
+//        for (long tranNum : transactionTable.keySet()) {
+//            if (!EndCheckpointLogRecord.fitsInOneRecord(chkptDPT.size(), chkptTxnTable.size() + 1)) {
+//                LogRecord endCheckpointLogRecord = new EndCheckpointLogRecord(chkptDPT, chkptTxnTable);
+//                logManager.appendToLog(endCheckpointLogRecord);
+//                chkptDPT.clear();
+//                chkptTxnTable.clear();
+//            }
+//            chkptTxnTable.put(tranNum, new Pair<>(transactionTable.get(tranNum).transaction.getStatus(), transactionTable.get(tranNum).lastLSN));
+//        }
+//
+//        // Last end checkpoint record
+//        LogRecord endRecord = new EndCheckpointLogRecord(chkptDPT, chkptTxnTable);
+//        logManager.appendToLog(endRecord);
+//        // Ensure checkpoint is fully flushed before updating the master record
+//        flushToLSN(endRecord.getLSN());
+//
+//        // Update master record
+//        MasterLogRecord masterRecord = new MasterLogRecord(beginLSN);
+//        logManager.rewriteMasterRecord(masterRecord);
+//    }
+
     @Override
     public synchronized void checkpoint() {
         // Create begin checkpoint log record and write to log
@@ -450,38 +490,9 @@ public class ARIESRecoveryManager implements RecoveryManager {
         Map<Long, Long> chkptDPT = new HashMap<>();
         Map<Long, Pair<Transaction.Status, Long>> chkptTxnTable = new HashMap<>();
 
-        // TODO(proj5): generate end checkpoint record(s) for DPT and transaction table
-        int pageNumber = 0;
-        int transactionNumber = 0;
-        for (Long pageNum : dirtyPageTable.keySet()) {
-            Long recLSN = dirtyPageTable.get(pageNum);
-            // 如果再加新的一页不能满足条件，就新建一个checkpoint
-            if (!EndCheckpointLogRecord.fitsInOneRecord(pageNumber + 1, transactionNumber)) {
-                EndCheckpointLogRecord endpoint = new EndCheckpointLogRecord(new HashMap<>(chkptDPT), new HashMap<>(chkptTxnTable));
-                logManager.appendToLog(endpoint);
-                flushToLSN(endpoint.getLSN());
-                chkptDPT.clear();
-                pageNumber = 0;
-            }
-            pageNumber += 1;
-            chkptDPT.put(pageNum, recLSN);
-        }
-
-        for (Long transNum : transactionTable.keySet()) {
-            TransactionTableEntry transactionTableEntry = transactionTable.get(transNum);
-            if (!EndCheckpointLogRecord.fitsInOneRecord(pageNumber, transactionNumber + 1)) {
-                EndCheckpointLogRecord endpoint = new EndCheckpointLogRecord(new HashMap<>(chkptDPT), new HashMap<>(chkptTxnTable));
-                logManager.appendToLog(endpoint);
-                flushToLSN(endpoint.getLSN());
-                chkptDPT.clear();
-                chkptTxnTable.clear();
-                pageNumber = 0;
-                transactionNumber = 0;
-            }
-            Transaction transaction = transactionTableEntry.transaction;
-            chkptTxnTable.put(transNum, new Pair<>(transaction.getStatus(), transactionTableEntry.lastLSN));
-            transactionNumber += 1;
-        }
+        // Refactor logging for dirty page table and transaction table
+        logCheckpointData(dirtyPageTable, chkptDPT, chkptTxnTable, true);
+        logCheckpointData(transactionTable, chkptDPT, chkptTxnTable, false);
 
         // Last end checkpoint record
         LogRecord endRecord = new EndCheckpointLogRecord(chkptDPT, chkptTxnTable);
@@ -493,6 +504,31 @@ public class ARIESRecoveryManager implements RecoveryManager {
         MasterLogRecord masterRecord = new MasterLogRecord(beginLSN);
         logManager.rewriteMasterRecord(masterRecord);
     }
+
+    private void logCheckpointData(Map<Long, ?> sourceMap, Map<Long, Long> chkptDPT, Map<Long, Pair<Transaction.Status, Long>> chkptTxnTable, boolean isDPT) {
+        for (long key : sourceMap.keySet()) {
+            if (isDPT) {
+                if (!EndCheckpointLogRecord.fitsInOneRecord(chkptDPT.size() + 1, 0)) {
+                    logAndReset(chkptDPT, chkptTxnTable);
+                }
+                chkptDPT.put(key, (Long) sourceMap.get(key));
+            } else {
+                if (!EndCheckpointLogRecord.fitsInOneRecord(chkptDPT.size(), chkptTxnTable.size() + 1)) {
+                    logAndReset(chkptDPT, chkptTxnTable);
+                }
+                TransactionTableEntry txnEntry = (TransactionTableEntry) sourceMap.get(key);
+                chkptTxnTable.put(key, new Pair<>(txnEntry.transaction.getStatus(), txnEntry.lastLSN));
+            }
+        }
+    }
+
+    private void logAndReset(Map<Long, Long> chkptDPT, Map<Long, Pair<Transaction.Status, Long>> chkptTxnTable) {
+        LogRecord endCheckpointLogRecord = new EndCheckpointLogRecord(chkptDPT, chkptTxnTable);
+        logManager.appendToLog(endCheckpointLogRecord);
+        chkptDPT.clear();
+        chkptTxnTable.clear();
+    }
+
 
 
     /**
