@@ -865,3 +865,5 @@ public class ARIESRecoveryManager implements RecoveryManager {
         }
     }
 }
+
+    //再见Rookie DB
